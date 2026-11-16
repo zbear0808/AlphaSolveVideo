@@ -18,12 +18,18 @@ from . import config, gecko, locate, runner, slp, solve, stages, validate
 
 
 def cmd_info(args) -> int:
+    status = 0
     for path in args.replays:
-        r = slp.read_replay(path)
+        try:
+            r = slp.read_replay(path)
+        except (OSError, slp.ReplayError) as e:
+            print(f"{Path(path).name}: error: {e}", file=sys.stderr)
+            status = 2
+            continue
         ok = "supported" if stages.is_supported(r.stage_id) else "NOT supported (no background codes)"
         print(f"{Path(path).name}: replay v{r.version}, {stages.stage_name(r.stage_id)} (id {r.stage_id}, {ok}), "
               f"frames {r.first_frame}..{r.last_frame} ({r.game_frames / 60:.1f} s)")
-    return 0
+    return status
 
 
 def _sample_cpu(pid: int, delay: float, out: dict) -> None:
