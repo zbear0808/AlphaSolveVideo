@@ -19,11 +19,18 @@ MAINLINE = "mainline"
 # EFBScale values in Ishiiruka's VideoConfig.h: 2 = 1x (native), 3 = 1.5x, 4 = 2x, 6 = 3x, 7 = 4x.
 EFB_SCALE_FOR = {1: 2, 2: 4, 3: 6, 4: 7}
 ASPECT_73_60 = 5
-# Mainline: AspectMode::ForceMelee and FrameDumpResolutionType::XFBAspectRatioCorrectedResolution.
-MAINLINE_ASPECT_MELEE = 3
+# Mainline: Melee's XFB is 640x480 per internal-resolution step, shown on a TV at about 73:60. Record it
+# aspect-corrected (scaled to about 640x528) using the VI's own aspect ratio (AspectMode::Auto).
+# ForceMelee assumes the netplay "Normal Lag Reduction" code changed the VI and squashes replays to 640x580.
+MAINLINE_ASPECT_AUTO = 0
 MAINLINE_DUMP_XFB_ASPECT_CORRECTED = 1
+MAINLINE_DUMP_XFB_RAW = 2
 
 FLICKER_CODE = "(EPILEPSY WARNING) Flicker Background Black/White asm v5"
+# Keeps the game from slipping a field now and then, which would break the black/white pairs (README).
+INPUT_TIMING_CODE = "Increase Input Timing Accuracy"
+# Codes every flicker recording needs; the stage's background-removal code is added per replay.
+FLICKER_CODES = [INPUT_TIMING_CODE, FLICKER_CODE]
 
 
 def _ini(sections: "OrderedDict[str, Dict[str, str]]") -> str:
@@ -102,7 +109,7 @@ def _mainline_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: O
     gfx = OrderedDict([
         ("Settings", OrderedDict([
             ("InternalResolution", str(scale)),
-            ("AspectRatio", str(MAINLINE_ASPECT_MELEE)),
+            ("AspectRatio", str(MAINLINE_ASPECT_AUTO)),
             ("FrameDumpsResolutionType", str(MAINLINE_DUMP_XFB_ASPECT_CORRECTED)),
             ("DumpFormat", "mkv"),   # FFV1 in Matroska; readable while it is still being written
             ("DumpCodec", "ffv1"),

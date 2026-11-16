@@ -57,7 +57,8 @@ def cmd_bench(args) -> int:
     codes = gecko.load_codes(locate.RESOURCES / "Required Codes.txt")
     enabled = []
     if args.flicker:
-        enabled = [config.FLICKER_CODE] + stages.BACKGROUND_CODES.get(replay.stage_id, [])
+        enabled = config.FLICKER_CODES + stages.BACKGROUND_CODES.get(replay.stage_id, [])
+    enabled += args.code
 
     work = Path(tempfile.mkdtemp(prefix="slp2alpha-bench-"))
     user, logs = work / "user", work / "logs"
@@ -153,7 +154,7 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     work = Path(tempfile.mkdtemp(prefix="slp2alpha-"))
     user, logs = work / "user", work / "logs"
     dump = config.dump_dir_for(engine, user, work / "dump")
-    enabled = [config.FLICKER_CODE] + stages.BACKGROUND_CODES[replay.stage_id]
+    enabled = config.FLICKER_CODES + stages.BACKGROUND_CODES[replay.stage_id]
     config.write_user_dir(user, codes, enabled=enabled, scale=args.scale, engine=engine,
                           cpu_thread=args.dual_core, debug_logging=args.debug)
     comm = work / "comm.json"
@@ -227,7 +228,7 @@ def main(argv=None) -> int:
                     help="output format (default: mov, ProRes 4444 with alpha)")
     pr.add_argument("--out-dir", help="output folder (default: next to each replay)")
     pr.add_argument("--scale", type=int, default=1, choices=sorted(config.EFB_SCALE_FOR),
-                    help="internal resolution multiplier (1 = 643x528)")
+                    help="internal resolution multiplier (1 = 640x528)")
     pr.add_argument("--dolphin", help="Slippi playback Dolphin .app or executable (default: packages/)")
     pr.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
     pr.add_argument("--ffmpeg", help="ffmpeg executable (ffprobe is expected next to it)")
@@ -257,6 +258,7 @@ def main(argv=None) -> int:
                     help="override the playback codes' single-core setting (CPUThread)")
     pb.add_argument("--backend", help="video backend, e.g. Metal, OGL or Vulkan (default: build default)")
     pb.add_argument("--extra-arg", action="append", default=[], help="extra Dolphin argument")
+    pb.add_argument("--code", action="append", default=[], help="extra Gecko code to enable (by name)")
     pb.add_argument("--debug", action="store_true", help="write Dolphin's log file")
     pb.add_argument("--keep", action="store_true")
     pb.set_defaults(func=cmd_bench)
