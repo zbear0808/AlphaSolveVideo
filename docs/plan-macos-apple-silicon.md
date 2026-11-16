@@ -18,6 +18,7 @@ What exists:
 
 - **`tools/dolphin-build/build-mac-mainline.sh`** builds Slippi's mainline-based playback Dolphin (`project-slippi/dolphin`, branch `fix/mainline-playback`, pinned commit) natively for Apple Silicon. It uses Dolphin's ARM64 JIT and the Metal backend, and the headless frontend: no window, no Dock icon. FFmpeg 8 handles recording. The build takes about 7 minutes on an M1. Source patches are in `tools/dolphin-build/patches-mainline/`. They add `--cout` progress markers, record only the replay's own frames, use multi-threaded FFV1, and fix two build problems with clang.
 - **`python3 -m slp2alpha render REPLAY...`** (run from `tools/slp2alpha`). It refuses stages without background-removal codes. It records lossless FFV1 in Matroska and solves while Dolphin is still recording. It writes `fullTransparent - NAME.mov` (ProRes 4444 with alpha) and `alphaMap - NAME.mov` next to the replay, or into `--out-dir`.
+- **`render --characters-only`** doesn't draw the stage (or its particles, the HUD and screen flashes), so it works on every stage and leaves just the fighters, their items and effects. `--hud`, `--hide-items` and `--hide-effects` adjust what's kept. See `docs/characters-only-research.md`, and `docs/stage-backgrounds.md` for what the other legal stages need with the stage visible.
 
 Measured on this Mac (M1, 16 GB, other apps running, load average 3–9) [verified]:
 
@@ -40,7 +41,7 @@ Findings since the plan was written [verified]:
 - Apple's ProRes encoder (`prores_videotoolbox`, software on a plain M1) is about twice as fast as `prores_ks` and matches it within 2/255.
 - Now that Dolphin runs well above real time, the solver is the limit. Overlapping the two steps gave 1.03× / 0.90× real time on this loaded machine.
 
-Not done yet: stages other than Battlefield and Dream Land (M6), the Windows path, and a double-clickable wrapper (M5). The x86 Ishiiruka build still works, but it opens a flashing window, so `render` refuses it unless given `--allow-window`.
+Not done yet: stage-visible renders of stages other than Battlefield and Dream Land (M6, see `docs/stage-backgrounds.md`; `--characters-only` already works on every stage), the Windows path, and a double-clickable wrapper (M5). The x86 Ishiiruka build still works, but it opens a flashing window, so `render` refuses it unless given `--allow-window`.
 
 ---
 

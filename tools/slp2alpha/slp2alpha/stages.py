@@ -23,6 +23,10 @@ BACKGROUND_CODES: Dict[int, List[str]] = {
     31: ["Disable Battlefield Background + Particles"],
 }
 
+# Stages checked in characters-only mode (the stage isn't drawn at all). Elsewhere, stage-spawned items
+# and enemies (Klaptraps, Goombas, Arwings...) would still show.
+CHARACTERS_ONLY_TESTED = (2, 3, 8, 28, 31, 32)
+
 
 def stage_name(stage_id: int) -> str:
     return STAGE_NAMES.get(stage_id, f"stage {stage_id}")

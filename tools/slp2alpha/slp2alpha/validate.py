@@ -102,7 +102,12 @@ class PairingResult:
     ambiguous: bool
 
 
-def detect_pairing(ffmpeg: str, video: str, pairs: int = 60) -> PairingResult:
+PAIRING_PAIRS = 300
+"""Pairs used to tell which frames go together (about 5 s of gameplay). Fighters barely move before GO,
+and with the stage hidden nothing else does, so a shorter window can't tell the pairings apart."""
+
+
+def detect_pairing(ffmpeg: str, video: str, pairs: int = PAIRING_PAIRS) -> PairingResult:
     color = first_color(ffmpeg, video)
     scores = {}
     for off in (0, 1):
@@ -110,7 +115,7 @@ def detect_pairing(ffmpeg: str, video: str, pairs: int = 60) -> PairingResult:
         scores[off] = sum(v) / len(v) if v else float("inf")
     best = min(scores, key=scores.get)
     other = scores[1 - best]
-    ambiguous = other < 0.02 or (best and scores[best] > 0.25 * other)
+    ambiguous = other < 0.02 or scores[best] > 0.5 * other
     return PairingResult(color, best, scores, ambiguous)
 
 

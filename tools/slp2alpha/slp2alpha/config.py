@@ -32,6 +32,15 @@ INPUT_TIMING_CODE = "Increase Input Timing Accuracy"
 # Codes every flicker recording needs; the stage's background-removal code is added per replay.
 FLICKER_CODES = [INPUT_TIMING_CODE, FLICKER_CODE]
 
+# Characters-only renders (Resources/Characters Only Codes.txt): nothing of the stage is drawn, so no
+# background codes are needed and every stage works. All of these only change what is drawn.
+HIDE_STAGE_CODES = ["Hide Stage - Characters Only", "Hide Stage Particles", "Hide Screen Flash",
+                    "Hide Shy Guys (Yoshi's Story)"]
+HIDE_HUD_CODE = "Hide HUD and Overlays"
+HIDE_ITEMS_CODE = "Hide Items and Projectiles"
+HIDE_EFFECTS_CODE = "Hide Effects"
+CODE_FILES = ("Required Codes.txt", "Characters Only Codes.txt")
+
 
 def _ini(sections: "OrderedDict[str, Dict[str, str]]") -> str:
     out: List[str] = []

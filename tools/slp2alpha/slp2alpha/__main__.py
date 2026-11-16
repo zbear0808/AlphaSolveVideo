@@ -55,7 +55,7 @@ def cmd_bench(args) -> int:
     """M0: measure unthrottled emulation speed of a Dolphin build on this machine."""
     replay = slp.read_replay(args.replay)
     iso = locate.find_iso(args.iso)
-    codes = gecko.load_codes(locate.RESOURCES / "Required Codes.txt")
+    codes = gecko.load_codes(*(locate.RESOURCES / f for f in config.CODE_FILES))
     enabled = []
     if args.flicker:
         enabled = config.FLICKER_CODES + stages.BACKGROUND_CODES.get(replay.stage_id, [])
@@ -146,25 +146,47 @@ def _recordings(dump: Path) -> List[Path]:
 
 
 # Game frames to record before the solver starts on a recording that is still growing: enough for
-# pairing detection (60 pairs) with margin for Dolphin's write buffering.
-STREAM_LEAD_FRAMES = 100
+# pairing detection (validate.PAIRING_PAIRS) with margin for Dolphin's write buffering.
+STREAM_LEAD_FRAMES = validate.PAIRING_PAIRS + 30
+
+
+def _render_codes(args, stage_id: int) -> List[str]:
+    """Gecko codes to enable for one render."""
+    enabled = list(config.FLICKER_CODES)
+    if args.characters_only:
+        enabled += config.HIDE_STAGE_CODES
+        if args.hide_items:
+            enabled.append(config.HIDE_ITEMS_CODE)
+        if args.hide_effects:
+            enabled.append(config.HIDE_EFFECTS_CODE)
+    else:
+        enabled += stages.BACKGROUND_CODES[stage_id]
+    hud = args.hud if args.hud is not None else not args.characters_only
+    if not hud:
+        enabled.append(config.HIDE_HUD_CODE)
+    return enabled
 
 
 def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, ffmpeg: str, ffprobe: str,
                 codes) -> bool:
     replay = slp.read_replay(replay_path)
     stage = stages.stage_name(replay.stage_id)
-    if not stages.is_supported(replay.stage_id):
+    if args.characters_only:
+        if replay.stage_id not in stages.CHARACTERS_ONLY_TESTED:
+            print(f"{replay_path.name}: note: {stage} hasn't been checked in characters-only mode; "
+                  "items or enemies the stage spawns would still show", file=sys.stderr)
+    elif not stages.is_supported(replay.stage_id):
         print(f"{replay_path.name}: skipped, {stage} has no background-removal codes "
-              f"(supported: {', '.join(stages.supported_stage_names())})", file=sys.stderr)
+              f"(supported: {', '.join(stages.supported_stage_names())}; "
+              "--characters-only works on every stage)", file=sys.stderr)
         return False
 
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else replay_path.resolve().parent
-    name = replay_path.stem
+    name = replay_path.stem + (" (characters only)" if args.characters_only else "")
     work = Path(tempfile.mkdtemp(prefix="slp2alpha-"))
     user, logs = work / "user", work / "logs"
     dump = config.dump_dir_for(engine, user, work / "dump")
-    enabled = config.FLICKER_CODES + stages.BACKGROUND_CODES[replay.stage_id]
+    enabled = _render_codes(args, replay.stage_id)
     config.write_user_dir(user, codes, enabled=enabled, scale=args.scale, engine=engine,
                           cpu_thread=args.dual_core, debug_logging=args.debug)
     comm = work / "comm.json"
@@ -266,7 +288,7 @@ def cmd_render(args) -> int:
     locate.check_iso(iso)
     ffmpeg = locate.find_ffmpeg(args.ffmpeg)
     ffprobe = locate.find_ffmpeg(args.ffmpeg, name="ffprobe")
-    codes = gecko.load_codes(locate.RESOURCES / "Required Codes.txt")
+    codes = gecko.load_codes(*(locate.RESOURCES / f for f in config.CODE_FILES))
     ok = [_render_one(args, Path(r), dolphin, engine, iso, ffmpeg, ffprobe, codes) for r in args.replays]
     return 0 if all(ok) else 1
 
@@ -286,6 +308,15 @@ def main(argv=None) -> int:
     pr.add_argument("--out-dir", help="output folder (default: next to each replay)")
     pr.add_argument("--scale", type=int, default=1, choices=sorted(config.EFB_SCALE_FOR),
                     help="internal resolution multiplier (1 = 640x528)")
+    pr.add_argument("--characters-only", action="store_true",
+                    help="don't draw the stage at all (works on every stage); also hides the HUD unless --hud")
+    pr.add_argument("--hud", action=argparse.BooleanOptionalAction, default=None,
+                    help="draw percents, stocks, timer and other overlays "
+                         "(default: on, off with --characters-only)")
+    pr.add_argument("--hide-items", action="store_true",
+                    help="with --characters-only: also hide items and projectiles")
+    pr.add_argument("--hide-effects", action="store_true",
+                    help="with --characters-only: also hide effects (hit sparks, dust, KO blasts...)")
     pr.add_argument("--dolphin", help="Slippi playback Dolphin .app or executable (default: packages/)")
     pr.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
     pr.add_argument("--ffmpeg", help="ffmpeg executable (ffprobe is expected next to it)")
