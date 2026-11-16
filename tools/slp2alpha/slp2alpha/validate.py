@@ -84,12 +84,23 @@ def first_color(ffmpeg: str, video: str) -> str:
     return "white" if l0 > l1 else "black"
 
 
-def pair_violations(ffmpeg: str, video: str, color: str, offset: int, pairs: Optional[int] = None) -> List[float]:
+VIOLATION_LEVEL = 16
+"""Black brighter than white by more than this (0-255) counts as a pair violation. Smaller differences are
+GameCube dithering and blending noise, which shows up in true pairs too."""
+
+
+def pair_violations(ffmpeg: str, video: str, color: str, offset: int, pairs: Optional[int] = None,
+                    level: Optional[int] = VIOLATION_LEVEL) -> List[float]:
+    """Per pair: share of pixels (0-255 scale) where the black-background frame is brighter than the white one.
+
+    With level=None, the mean amount instead of the share of pixels over `level`.
+    """
     sel = select_exprs(color, offset)
+    count = f",lut=y='if(gt(val\\,{level})\\,255\\,0)'" if level is not None else ""
     graph = (f"[0:v]format=gbrp,split[a][b];"
              f"[a]select={sel['black']},setpts=N/TB/60[blk];"
              f"[b]select={sel['white']},setpts=N/TB/60[wht];"
-             f"[blk][wht]blend=all_mode=subtract:shortest=1,format=gray,"
+             f"[blk][wht]blend=all_mode=subtract:shortest=1,format=gray{count},"
              f"signalstats,metadata=print:key=lavfi.signalstats.YAVG:file=-[o]")
     return _metadata_values(ffmpeg, video, graph, pairs)
 

@@ -39,7 +39,10 @@ HIDE_STAGE_CODES = ["Hide Stage - Characters Only", "Hide Stage Particles", "Hid
 HIDE_HUD_CODE = "Hide HUD and Overlays"
 HIDE_ITEMS_CODE = "Hide Items and Projectiles"
 HIDE_EFFECTS_CODE = "Hide Effects"
-CODE_FILES = ("Required Codes.txt", "Characters Only Codes.txt")
+# Static camera (Resources/Camera Codes.txt + the screen-shake code from Required Codes.txt): Melee's own
+# fixed camera, which shows the whole stage, without screen shake.
+STATIC_CAMERA_CODES = ["Static Camera - Fixed Camera Mode", "Disable Screen Shake"]
+CODE_FILES = ("Required Codes.txt", "Characters Only Codes.txt", "Camera Codes.txt")
 
 
 def _ini(sections: "OrderedDict[str, Dict[str, str]]") -> str:

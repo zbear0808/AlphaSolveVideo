@@ -1,0 +1,11 @@
+Camera codes for rendering. These change only where the camera looks; see docs/static-camera.md.
+
+$Static Camera - Fixed Camera Mode [AlphaSolveVideo]
+*Uses Melee's own fixed camera (the one Special Melee's Fixed-Camera mode uses) on every stage: each stage
+*defines a fixed position, target and field of view that show the whole stage.
+*Combine with "Disable Screen Shake" for a completely still view.
+*Ground_EnableMatchCamera always takes the fixed-camera branch (the stage parameter it normally checks
+*is only set for a few single-player stages).
+*Gameplay is unchanged (tested on all six legal stages): only the replay's "is offscreen" flag and the
+*camera-relative position of a fighter during a screen KO differ.
+041C5820 60000000

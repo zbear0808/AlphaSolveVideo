@@ -161,6 +161,8 @@ def _render_codes(args, stage_id: int) -> List[str]:
             enabled.append(config.HIDE_EFFECTS_CODE)
     else:
         enabled += stages.BACKGROUND_CODES[stage_id]
+    if args.static_camera:
+        enabled += config.STATIC_CAMERA_CODES
     hud = args.hud if args.hud is not None else not args.characters_only
     if not hud:
         enabled.append(config.HIDE_HUD_CODE)
@@ -182,7 +184,9 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
         return False
 
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else replay_path.resolve().parent
-    name = replay_path.stem + (" (characters only)" if args.characters_only else "")
+    variant = [label for on, label in ((args.characters_only, "characters only"),
+                                       (args.static_camera, "static camera")) if on]
+    name = replay_path.stem + (f" ({', '.join(variant)})" if variant else "")
     work = Path(tempfile.mkdtemp(prefix="slp2alpha-"))
     user, logs = work / "user", work / "logs"
     dump = config.dump_dir_for(engine, user, work / "dump")
@@ -317,6 +321,9 @@ def main(argv=None) -> int:
                     help="with --characters-only: also hide items and projectiles")
     pr.add_argument("--hide-effects", action="store_true",
                     help="with --characters-only: also hide effects (hit sparks, dust, KO blasts...)")
+    pr.add_argument("--static-camera", action="store_true",
+                    help="keep the camera still: Melee's fixed camera, which shows the whole stage, without "
+                         "screen shake (fighters look smaller; consider --scale 2)")
     pr.add_argument("--dolphin", help="Slippi playback Dolphin .app or executable (default: packages/)")
     pr.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
     pr.add_argument("--ffmpeg", help="ffmpeg executable (ffprobe is expected next to it)")
