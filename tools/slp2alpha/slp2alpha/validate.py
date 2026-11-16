@@ -12,7 +12,7 @@ import json
 import re
 import subprocess
 from dataclasses import dataclass
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 _YAVG = re.compile(r"lavfi\.signalstats\.YAVG=([0-9.]+)")
 
@@ -24,15 +24,36 @@ class Probe:
     width: int
     height: int
     frames: int
+    rate: str = "60/1"
+    """The recording's field rate (r_frame_rate), e.g. 60000/1001 (mainline) or 60/1 (Ishiiruka)."""
 
 
 def probe(ffprobe: str, video: str) -> Probe:
     out = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets",
-                          "-show_entries", "stream=codec_name,pix_fmt,width,height,nb_read_packets",
+                          "-show_entries", "stream=codec_name,pix_fmt,width,height,nb_read_packets,r_frame_rate",
                           "-of", "json", video], capture_output=True, text=True, check=True).stdout
     s = json.loads(out)["streams"][0]
     return Probe(s.get("codec_name", "?"), s.get("pix_fmt", "?"), int(s.get("width", 0)),
-                 int(s.get("height", 0)), int(s.get("nb_read_packets", 0)))
+                 int(s.get("height", 0)), int(s.get("nb_read_packets", 0)), s.get("r_frame_rate", "60/1"))
+
+
+def timestamp_gaps(ffprobe: str, video: str, rate: str) -> List[Tuple[int, int]]:
+    """(frame index after the gap, fields missing) wherever Dolphin skipped a field.
+
+    Cheap: reads packet timestamps only. Recordings with real timestamps (Matroska) show a dropped or
+    skipped field as a jump of two field durations.
+    """
+    out = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time",
+                          "-of", "csv=p=0", video], capture_output=True, text=True, check=True).stdout
+    times = sorted(float(t) for t in out.split() if t not in ("N/A", ""))
+    num, _, den = rate.partition("/")
+    step = float(den or 1) / float(num)
+    gaps = []
+    for i in range(1, len(times)):
+        fields = round((times[i] - times[i - 1]) / step)
+        if fields > 1:
+            gaps.append((i, fields - 1))
+    return gaps
 
 
 def select_exprs(first_color: str, offset: int) -> Dict[str, str]:
@@ -132,3 +153,48 @@ def validate_dump(ffmpeg: str, ffprobe: str, video: str) -> DumpReport:
     breaks = [i for i in range(1, len(luma)) if not alternating[i - 1] and abs(luma[i] - luma[i - 1]) < 0.15 * (max(luma) - min(luma))]
     violations = pair_violations(ffmpeg, video, pairing.first_color, pairing.offset)
     return DumpReport(p, pairing, alternation, breaks[:20], max(violations) if violations else 0.0)
+
+
+def _alternation(luma: List[float]) -> float:
+    if len(luma) < 2:
+        return 0.0
+    mid = (max(luma) + min(luma)) / 2
+    bright = [v > mid for v in luma]
+    return sum(bright[i] != bright[i - 1] for i in range(1, len(bright))) / (len(bright) - 1)
+
+
+@dataclass
+class QuickReport:
+    """The checks a render needs before solving, in a few seconds instead of several full decodes."""
+    probe: Probe
+    pairing: PairingResult
+    alternation: float
+    """Over the first CHECK_FRAMES frames: is the flicker code active?"""
+    gaps: List[Tuple[int, int]]
+
+    def problems(self, expected_frames: Optional[int] = None) -> List[str]:
+        out = []
+        if self.probe.codec != "ffv1":
+            out.append(f"recording codec is {self.probe.codec}, expected lossless ffv1")
+        if expected_frames is not None and abs(self.probe.frames - expected_frames) > 4:
+            out.append(f"recording has {self.probe.frames} frames, expected about {expected_frames}")
+        if self.pairing.ambiguous:
+            out.append("could not tell which frames form black/white pairs "
+                       f"(violation scores {self.pairing.scores})")
+        if self.alternation < 0.95:
+            out.append(f"background alternates on only {self.alternation:.0%} of the first frames; "
+                       "the flicker code may not be active")
+        if self.gaps:
+            missing = sum(n for _, n in self.gaps)
+            out.append(f"Dolphin skipped {missing} field(s) in {len(self.gaps)} place(s) (first at frame "
+                       f"{self.gaps[0][0]}); the game lagged there and black/white pairs may be off")
+        return out
+
+
+CHECK_FRAMES = 1200
+
+
+def quick_check(ffmpeg: str, ffprobe: str, video: str) -> QuickReport:
+    p = probe(ffprobe, video)
+    return QuickReport(p, detect_pairing(ffmpeg, video), _alternation(luma_series(ffmpeg, video, CHECK_FRAMES)),
+                       timestamp_gaps(ffprobe, video, p.rate))

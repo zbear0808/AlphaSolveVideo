@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import subprocess
 from dataclasses import dataclass, field
+from functools import lru_cache
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, FrozenSet, List, Optional, Tuple
 
 from .validate import select_exprs
 
@@ -43,6 +44,19 @@ FORMATS: Dict[str, OutputFormat] = {
 }
 DEFAULT_FORMAT = "mov"
 
+# Same formats through faster encoders, used when this ffmpeg has them. Apple's ProRes encoder is about
+# twice as fast as prores_ks and matches it within 2/255; allow_sw lets it run where there is no ProRes
+# hardware (plain M1/M2). The alpha map is greyscale, so 4:2:2 HQ loses nothing there.
+ACCELERATED: Dict[str, Tuple[str, OutputFormat]] = {
+    "mov": ("prores_videotoolbox", OutputFormat(
+        ".mov",
+        ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "4444", "-pix_fmt", "bgra"],
+        ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "hq", "-pix_fmt", "p210le"])),
+}
+
+# Dolphin records NTSC fields at 60000/1001 per second; each game frame is shown for two of them.
+DEFAULT_FIELD_RATE = "60000/1001"
+
 _PAD_EVEN = "pad=ceil(iw/2)*2:ceil(ih/2)*2"
 
 
@@ -52,26 +66,33 @@ class SolveOutputs:
     alpha_map: Path
 
 
-def filter_graph(first_color: str, offset: int, fmt: OutputFormat) -> str:
+def filter_graph(first_color: str, offset: int, fmt: OutputFormat, rate: str = DEFAULT_FIELD_RATE) -> str:
+    """rate: the recording's field rate, which is also the output frame rate (one frame per game frame).
+
+    Black and white frames are matched by their position, not their timestamps: the blend filters pair
+    inputs by timestamp, and recordings with millisecond timestamps (Matroska) would otherwise sometimes
+    pair a frame with the neighbouring game frame.
+    """
     sel = select_exprs(first_color, offset)
+    num, _, den = rate.partition("/")
+    retime = f"settb={den or 1}/{num},setpts=N"  # frame N of each branch at N / rate seconds
     map_tail = f",{_PAD_EVEN}" if fmt.even_size else ""
     fg_tail = f",{_PAD_EVEN}:color=black@0" if fmt.even_size else ""
     graph = (
         f"[0]split=3[a][b][c];"
-        f"[a]select={sel['black']},setpts=PTS-STARTPTS[blk];"
-        f"[b]select={sel['white']},setpts=PTS-STARTPTS[wht];"
-        f"[c]select={sel['black']},setpts=PTS-STARTPTS[blk2];"
+        f"[a]select={sel['black']},{retime}[blk];"
+        f"[b]select={sel['white']},{retime}[wht];"
+        f"[c]select={sel['black']},{retime}[blk2];"
         f"[blk]format=gbrp[v1];[wht]format=gbrp[v2];"
         # alpha (per channel) = 255 - |black - white|
         f"[v1][v2]blend=all_mode=difference:shortest=1,negate,format=yuv420p[map];"
-        f"[map]setpts=0.5*PTS[alphaMap];"
-        f"[alphaMap]split=2[alphaMapUse][mapRaw];"
+        f"[map]split=2[alphaMapUse][mapRaw];"
         f"[mapRaw]null{map_tail}[mapOut];"
         # alpha = max over r, g, b (two lighten blends; bit-identical to the original geq)
         f"[alphaMapUse]format=gbrp,extractplanes=r+g+b[ar][ag][ab];"
         f"[ar][ag]blend=all_mode=lighten[arg];"
         f"[arg][ab]blend=all_mode=lighten,split=2[am1][am2];"
-        f"[blk2]setpts=0.5*PTS,format=gbrp[dg];"
+        f"[blk2]format=gbrp[dg];"
     )
     if not fmt.gif:
         # colour = black * 255 / alpha (lookup table instead of a per-pixel expression)
@@ -97,20 +118,44 @@ def output_paths(out_dir: Path, name: str, fmt_name: str) -> SolveOutputs:
                         Path(out_dir) / f"alphaMap - {name}{fmt.suffix}")
 
 
+@lru_cache(maxsize=None)
+def available_encoders(ffmpeg: str) -> FrozenSet[str]:
+    try:
+        out = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=30).stdout
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    return frozenset(parts[1] for parts in (line.split() for line in out.splitlines())
+                     if len(parts) > 1 and len(parts[0]) == 6 and parts[0][0] in "VAS")
+
+
+def encoder_choices(ffmpeg: str, fmt: str) -> List[OutputFormat]:
+    """The output format through the fastest available encoder first, then the portable one."""
+    choices = []
+    if fmt in ACCELERATED and ACCELERATED[fmt][0] in available_encoders(ffmpeg):
+        choices.append(ACCELERATED[fmt][1])
+    return choices + [FORMATS[fmt]]
+
+
 def solve(ffmpeg: str, video: str, out_dir: Path, name: str, first_color: str, offset: int,
-          fmt: str = DEFAULT_FORMAT, pairs: Optional[int] = None, show_progress: bool = True) -> SolveOutputs:
+          fmt: str = DEFAULT_FORMAT, pairs: Optional[int] = None, show_progress: bool = True,
+          rate: str = DEFAULT_FIELD_RATE) -> SolveOutputs:
     if fmt not in FORMATS:
         raise ValueError(f"unknown format {fmt!r}; choose from {', '.join(FORMATS)}")
-    spec = FORMATS[fmt]
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     outputs = output_paths(out_dir, name, fmt)
-
-    cmd: List[str] = [ffmpeg, "-y", "-v", "error"] + (["-stats"] if show_progress else [])
-    cmd += ["-i", video, "-filter_complex", filter_graph(first_color, offset, spec)]
-    limit = ["-frames:v", str(pairs)] if pairs else []
-    cmd += ["-map", "[fg]"] + limit + spec.video_args + [str(outputs.transparent)]
-    cmd += ["-map", "[mapGif]" if spec.gif else "[mapOut]"] + limit + spec.map_args + [str(outputs.alpha_map)]
-    subprocess.run(cmd, check=True)
+    choices = encoder_choices(ffmpeg, fmt)
+    for i, spec in enumerate(choices):
+        cmd: List[str] = [ffmpeg, "-nostdin", "-y", "-v", "error"] + (["-stats"] if show_progress else [])
+        cmd += ["-i", video, "-filter_complex", filter_graph(first_color, offset, spec, rate)]
+        limit = ["-frames:v", str(pairs)] if pairs else []
+        cmd += ["-map", "[fg]"] + limit + spec.video_args + [str(outputs.transparent)]
+        cmd += ["-map", "[mapGif]" if spec.gif else "[mapOut]"] + limit + spec.map_args + [str(outputs.alpha_map)]
+        try:
+            subprocess.run(cmd, check=True)
+            return outputs
+        except subprocess.CalledProcessError:
+            if i == len(choices) - 1:
+                raise
     return outputs
 
 

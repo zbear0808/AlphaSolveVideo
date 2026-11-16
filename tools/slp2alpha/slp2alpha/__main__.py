@@ -177,13 +177,13 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
               file=sys.stderr)
     video = str(dumps[0])
 
-    report = validate.validate_dump(ffmpeg, ffprobe, video)
+    report = validate.quick_check(ffmpeg, ffprobe, video)
     expected = 2 * (replay.last_frame - slp.FIRST_FRAME)
     for problem in report.problems(expected_frames=expected):
         print(f"  warning: {problem}", file=sys.stderr)
     pairs = solve.pair_count(report.probe.frames, report.pairing.offset)
     outputs = solve.solve(ffmpeg, video, out_dir, name, report.pairing.first_color, report.pairing.offset,
-                          fmt=args.format, pairs=pairs, show_progress=False)
+                          fmt=args.format, pairs=pairs, show_progress=False, rate=report.probe.rate)
     t_done = time.monotonic()
     game_seconds = replay.game_frames / 60
     print(f"  done in {t_done - t_start:.0f} s (Dolphin {t_rendered - t_start:.0f} s, solve {t_done - t_rendered:.0f} s) "
