@@ -7,6 +7,8 @@ lookup-table filters (about 4x faster, output equal within 0.007/255).
 from __future__ import annotations
 
 import subprocess
+import threading
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
@@ -136,9 +138,44 @@ def encoder_choices(ffmpeg: str, fmt: str) -> List[OutputFormat]:
     return choices + [FORMATS[fmt]]
 
 
+class GrowingFile:
+    """A Matroska recording that Dolphin is still writing, streamed to ffmpeg as it grows.
+
+    pump() copies the file into a pipe and closes the pipe once writer_done is set and everything
+    written has been sent, so ffmpeg sees the end of the recording exactly when Dolphin stops.
+    """
+
+    def __init__(self, path: Path, writer_done: threading.Event, poll_seconds: float = 0.05):
+        self.path = Path(path)
+        self.writer_done = writer_done
+        self.poll_seconds = poll_seconds
+
+    def pump(self, out) -> None:
+        try:
+            with open(self.path, "rb") as f:
+                while True:
+                    chunk = f.read(1 << 20)
+                    if not chunk:
+                        if not self.writer_done.is_set():
+                            time.sleep(self.poll_seconds)
+                            continue
+                        chunk = f.read(1 << 20)  # whatever was written just before the writer finished
+                        if not chunk:
+                            break
+                    out.write(chunk)
+        except (BrokenPipeError, ValueError):  # ffmpeg exited early; its exit status reports why
+            pass
+        finally:
+            try:
+                out.close()
+            except BrokenPipeError:
+                pass
+
+
 def solve(ffmpeg: str, video: str, out_dir: Path, name: str, first_color: str, offset: int,
           fmt: str = DEFAULT_FORMAT, pairs: Optional[int] = None, show_progress: bool = True,
-          rate: str = DEFAULT_FIELD_RATE) -> SolveOutputs:
+          rate: str = DEFAULT_FIELD_RATE, source: Optional[GrowingFile] = None) -> SolveOutputs:
+    """Solve a recording; with source, read it while it is still being recorded (video is ignored)."""
     if fmt not in FORMATS:
         raise ValueError(f"unknown format {fmt!r}; choose from {', '.join(FORMATS)}")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -146,16 +183,23 @@ def solve(ffmpeg: str, video: str, out_dir: Path, name: str, first_color: str, o
     choices = encoder_choices(ffmpeg, fmt)
     for i, spec in enumerate(choices):
         cmd: List[str] = [ffmpeg, "-nostdin", "-y", "-v", "error"] + (["-stats"] if show_progress else [])
-        cmd += ["-i", video, "-filter_complex", filter_graph(first_color, offset, spec, rate)]
+        cmd += ["-f", "matroska", "-i", "pipe:0"] if source else ["-i", video]
+        cmd += ["-filter_complex", filter_graph(first_color, offset, spec, rate)]
         limit = ["-frames:v", str(pairs)] if pairs else []
         cmd += ["-map", "[fg]"] + limit + spec.video_args + [str(outputs.transparent)]
         cmd += ["-map", "[mapGif]" if spec.gif else "[mapOut]"] + limit + spec.map_args + [str(outputs.alpha_map)]
-        try:
-            subprocess.run(cmd, check=True)
+        if source:
+            proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+            feeder = threading.Thread(target=source.pump, args=(proc.stdin,), daemon=True)
+            feeder.start()
+            returncode = proc.wait()
+            feeder.join()
+        else:
+            returncode = subprocess.run(cmd).returncode
+        if returncode == 0:
             return outputs
-        except subprocess.CalledProcessError:
-            if i == len(choices) - 1:
-                raise
+        if i == len(choices) - 1:
+            raise subprocess.CalledProcessError(returncode, cmd)
     return outputs
 
 

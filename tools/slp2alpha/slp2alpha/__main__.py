@@ -12,6 +12,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
+from typing import List
 
 from . import config, gecko, locate, runner, slp, solve, stages, validate
 
@@ -140,6 +141,15 @@ def _progress_printer(label: str):
     return show
 
 
+def _recordings(dump: Path) -> List[Path]:
+    return sorted(p for ext in ("*.mkv", "*.avi") for p in dump.rglob(ext))
+
+
+# Game frames to record before the solver starts on a recording that is still growing: enough for
+# pairing detection (60 pairs) with margin for Dolphin's write buffering.
+STREAM_LEAD_FRAMES = 100
+
+
 def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, ffmpeg: str, ffprobe: str,
                 codes) -> bool:
     replay = slp.read_replay(replay_path)
@@ -163,14 +173,56 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
 
     print(f"{replay_path.name}: {stage}, {replay.game_frames / 60:.1f} s of gameplay -> {out_dir}")
     t_start = time.monotonic()
-    res = runner.run_dolphin(dolphin, iso, comm, user, dump, logs, stop_at_frame=replay.last_frame,
-                             boot_timeout=args.boot_timeout, on_progress=_progress_printer("Dolphin"))
+    printer = _progress_printer("Dolphin")
+    progress = {"current": None}
+    dolphin_done = threading.Event()
+    box = {}
+
+    def on_progress(current, target):
+        progress["current"] = current
+        printer(current, target)
+
+    def run():
+        try:
+            box["res"] = runner.run_dolphin(dolphin, iso, comm, user, dump, logs, stop_at_frame=replay.last_frame,
+                                            boot_timeout=args.boot_timeout, on_progress=on_progress,
+                                            grace_seconds=1.0)
+        finally:
+            dolphin_done.set()
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+
+    # The flicker code draws every game frame twice. Melee keeps drawing after the last replay frame
+    # (e.g. the pause screen after an LRAS quit) until Dolphin is stopped, so only this many pairs count.
+    expected_pairs = replay.last_frame - slp.FIRST_FRAME
+
+    # The native build records Matroska, which can be read while it is written: solve alongside Dolphin.
+    stream = engine == config.MAINLINE and args.stream
+    outputs = None
+    if stream:
+        while not dolphin_done.is_set():
+            current = progress["current"]
+            if current is not None and current >= slp.FIRST_FRAME + STREAM_LEAD_FRAMES and _recordings(dump):
+                break
+            time.sleep(0.2)
+        if not dolphin_done.is_set():
+            time.sleep(0.5)
+            video = str(_recordings(dump)[0])
+            pairing = validate.detect_pairing(ffmpeg, video)
+            rate = validate.probe(ffprobe, video).rate
+            outputs = solve.solve(ffmpeg, video, out_dir, name, pairing.first_color, pairing.offset,
+                                  fmt=args.format, pairs=expected_pairs, show_progress=False, rate=rate,
+                                  source=solve.GrowingFile(Path(video), dolphin_done))
+    worker.join()
     sys.stderr.write("\n")
     t_rendered = time.monotonic()
-    dumps = sorted(p for ext in ("*.mkv", "*.avi") for p in dump.rglob(ext))
-    if res.reason != "finished" or not dumps:
-        why = res.reason if res.reason != "finished" else "no recording was written"
-        print(f"  Dolphin did not finish ({why}, exit code {res.returncode}). Logs kept in {logs}", file=sys.stderr)
+    res = box.get("res")
+    dumps = _recordings(dump)
+    if res is None or res.reason != "finished" or not dumps:
+        why = "crashed" if res is None else res.reason if res.reason != "finished" else "no recording was written"
+        code = None if res is None else res.returncode
+        print(f"  Dolphin did not finish ({why}, exit code {code}). Logs kept in {logs}", file=sys.stderr)
         return False
     if len(dumps) > 1:
         print(f"  warning: Dolphin split the recording into {len(dumps)} files; using {dumps[0].name}",
@@ -178,16 +230,21 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     video = str(dumps[0])
 
     report = validate.quick_check(ffmpeg, ffprobe, video)
-    expected = 2 * (replay.last_frame - slp.FIRST_FRAME)
-    for problem in report.problems(expected_frames=expected):
+    for problem in report.problems(expected_frames=2 * expected_pairs):
         print(f"  warning: {problem}", file=sys.stderr)
-    pairs = solve.pair_count(report.probe.frames, report.pairing.offset)
-    outputs = solve.solve(ffmpeg, video, out_dir, name, report.pairing.first_color, report.pairing.offset,
-                          fmt=args.format, pairs=pairs, show_progress=False, rate=report.probe.rate)
+    if outputs is None:
+        pairs = min(expected_pairs, solve.pair_count(report.probe.frames, report.pairing.offset))
+        outputs = solve.solve(ffmpeg, video, out_dir, name, report.pairing.first_color, report.pairing.offset,
+                              fmt=args.format, pairs=pairs, show_progress=False, rate=report.probe.rate)
+    elif (report.pairing.first_color, report.pairing.offset) != (pairing.first_color, pairing.offset):
+        print(f"  warning: pairing from the first frames ({pairing.first_color}/{pairing.offset}) differs from "
+              f"the full recording's ({report.pairing.first_color}/{report.pairing.offset})", file=sys.stderr)
     t_done = time.monotonic()
     game_seconds = replay.game_frames / 60
-    print(f"  done in {t_done - t_start:.0f} s (Dolphin {t_rendered - t_start:.0f} s, solve {t_done - t_rendered:.0f} s) "
-          f"for {game_seconds:.0f} s of gameplay: {game_seconds / (t_done - t_start):.2f}x real time")
+    timing = (f"Dolphin and solver together {t_rendered - t_start:.0f} s, then checks {t_done - t_rendered:.0f} s"
+              if stream else f"Dolphin {t_rendered - t_start:.0f} s, solve {t_done - t_rendered:.0f} s")
+    print(f"  done in {t_done - t_start:.0f} s ({timing}) for {game_seconds:.0f} s of gameplay: "
+          f"{game_seconds / (t_done - t_start):.2f}x real time")
     print(f"  {outputs.transparent}\n  {outputs.alpha_map}")
     if args.keep:
         print(f"  work folder kept: {work}")
@@ -235,6 +292,8 @@ def main(argv=None) -> int:
     pr.add_argument("--dual-core", action=argparse.BooleanOptionalAction, default=None,
                     help="override the playback codes' single-core setting (CPUThread)")
     pr.add_argument("--boot-timeout", type=float, default=120.0)
+    pr.add_argument("--stream", action=argparse.BooleanOptionalAction, default=True,
+                    help="solve while Dolphin is still recording (native build only; default on)")
     pr.add_argument("--allow-window", action="store_true",
                     help="allow a non-headless Dolphin build (its window flashes: EPILEPSY WARNING)")
     pr.add_argument("--debug", action="store_true", help="write Dolphin's log file")

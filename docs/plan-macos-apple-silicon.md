@@ -1,6 +1,6 @@
 # Slippi replays to transparent video on Apple Silicon Macs: implementation plan
 
-Status: proposal, November 2026.
+Status: first version working (native build), November 2026. Section 0 describes what exists and what it measures; the rest of this document is the original plan, kept for its findings and reasoning.
 Scope: turn a Slippi replay (`.slp`) into the transparent outputs this repo produces, on an Apple Silicon Mac, unattended, and without taking over the screen.
 
 Evidence tags used throughout:
@@ -9,6 +9,38 @@ Evidence tags used throughout:
 - **[reported]**: found during research (sources in Appendix H); not re-checked by hand.
 - **[estimate]**: a reasoned guess that still needs a measurement.
 - **[to test]**: a design choice that needs an experiment before we rely on it.
+
+---
+
+## 0. Current state (November 2026)
+
+What exists:
+
+- **`tools/dolphin-build/build-mac-mainline.sh`** builds Slippi's mainline-based playback Dolphin (`project-slippi/dolphin`, branch `fix/mainline-playback`, pinned commit) natively for Apple Silicon. It uses Dolphin's ARM64 JIT and the Metal backend, and the headless frontend: no window, no Dock icon. FFmpeg 8 handles recording. The build takes about 7 minutes on an M1. Source patches are in `tools/dolphin-build/patches-mainline/`. They add `--cout` progress markers, record only the replay's own frames, use multi-threaded FFV1, and fix two build problems with clang.
+- **`python3 -m slp2alpha render REPLAY...`** (run from `tools/slp2alpha`). It refuses stages without background-removal codes. It records lossless FFV1 in Matroska and solves while Dolphin is still recording. It writes `fullTransparent - NAME.mov` (ProRes 4444 with alpha) and `alphaMap - NAME.mov` next to the replay, or into `--out-dir`.
+
+Measured on this Mac (M1, 16 GB, other apps running, load average 3–9) [verified]:
+
+| | Old x86 build under Rosetta | Native build |
+|---|---|---|
+| Playback only | 50 game fps | 232 game fps |
+| Playback + recording | 27 game fps | 156 game fps |
+| Playback + recording + flicker code | about 9 game fps (one run) | 87–108 game fps (1.45–1.8× real time) |
+| Full render, 32 s replay (Battlefield) | – | 31 s (1.03× real time) |
+| Full render, 173 s replay (Dream Land) | – | 191 s (0.90× real time) |
+
+Space: about 1.8 GB of temporary recording per minute of gameplay (deleted afterwards). Output: about 1.4 GB per minute for the transparent video and 0.25 GB for the alpha map.
+
+Findings since the plan was written [verified]:
+
+- Mainline's ForceMelee aspect mode assumes the netplay lag-reduction code. On replays it squashes the recording to 640×580. AspectMode::Auto with the aspect-corrected XFB gives the correct 640×528.
+- Without "Increase Input Timing Accuracy" (listed as required in the README), the native build skips about one field in 60, which breaks the black/white pairs. `render` always enables it.
+- Matroska stores millisecond timestamps, so the solver now pairs frames by position. Pairing by timestamp put about 31 % of frames with the neighbouring game frame.
+- Dual-core mode isn't faster (110.6 vs 107.7 game fps), so Slippi's single-core setting stays.
+- Apple's ProRes encoder (`prores_videotoolbox`, software on a plain M1) is about twice as fast as `prores_ks` and matches it within 2/255.
+- Now that Dolphin runs well above real time, the solver is the limit. Overlapping the two steps gave 1.03× / 0.90× real time on this loaded machine.
+
+Not done yet: stages other than Battlefield and Dream Land (M6), the Windows path, and a double-clickable wrapper (M5). The x86 Ishiiruka build still works, but it opens a flashing window, so `render` refuses it unless given `--allow-window`.
 
 ---
 

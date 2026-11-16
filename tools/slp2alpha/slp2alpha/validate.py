@@ -156,11 +156,14 @@ def validate_dump(ffmpeg: str, ffprobe: str, video: str) -> DumpReport:
 
 
 def _alternation(luma: List[float]) -> float:
-    if len(luma) < 2:
+    """Fraction of frames whose brightness moves the opposite way from the frame before.
+
+    Robust to the scene getting brighter or darker overall (zooms, flashes), unlike a fixed threshold.
+    """
+    if len(luma) < 3:
         return 0.0
-    mid = (max(luma) + min(luma)) / 2
-    bright = [v > mid for v in luma]
-    return sum(bright[i] != bright[i - 1] for i in range(1, len(bright))) / (len(bright) - 1)
+    turns = sum((luma[i] - luma[i - 1]) * (luma[i - 1] - luma[i - 2]) < 0 for i in range(2, len(luma)))
+    return turns / (len(luma) - 2)
 
 
 @dataclass
@@ -173,21 +176,23 @@ class QuickReport:
     gaps: List[Tuple[int, int]]
 
     def problems(self, expected_frames: Optional[int] = None) -> List[str]:
+        """expected_frames: fields the replay should produce; anything recorded after them is ignored."""
         out = []
         if self.probe.codec != "ffv1":
             out.append(f"recording codec is {self.probe.codec}, expected lossless ffv1")
-        if expected_frames is not None and abs(self.probe.frames - expected_frames) > 4:
-            out.append(f"recording has {self.probe.frames} frames, expected about {expected_frames}")
+        if expected_frames is not None and self.probe.frames < expected_frames - 4:
+            out.append(f"recording has {self.probe.frames} frames, expected {expected_frames}")
         if self.pairing.ambiguous:
             out.append("could not tell which frames form black/white pairs "
                        f"(violation scores {self.pairing.scores})")
         if self.alternation < 0.95:
             out.append(f"background alternates on only {self.alternation:.0%} of the first frames; "
                        "the flicker code may not be active")
-        if self.gaps:
-            missing = sum(n for _, n in self.gaps)
-            out.append(f"Dolphin skipped {missing} field(s) in {len(self.gaps)} place(s) (first at frame "
-                       f"{self.gaps[0][0]}); the game lagged there and black/white pairs may be off")
+        gaps = [g for g in self.gaps if expected_frames is None or g[0] < expected_frames]
+        if gaps:
+            missing = sum(n for _, n in gaps)
+            out.append(f"Dolphin skipped {missing} field(s) in {len(gaps)} place(s) (first at frame "
+                       f"{gaps[0][0]}); the game lagged there and black/white pairs may be off")
         return out
 
 
