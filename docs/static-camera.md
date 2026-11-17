@@ -1,6 +1,6 @@
 # Static camera
 
-`python3 -m slp2alpha render --static-camera` keeps the camera still for the whole replay. It works with the stage visible or with `--characters-only`. With characters-only renders, the fighters then move over a fixed frame, so they can be laid over a still image of the stage, or any other background, without matching camera moves.
+`python3 -m slp2alpha render --static-camera` keeps the camera still for the whole replay. It works with the stage visible or with `--characters-only`. With characters-only renders, the fighters then move over a fixed frame, so they can be laid over a still image of the stage, or any other background, without matching camera moves. [The logo as the stage](logo-stage.md) does that with a 3D logo sized to the stage.
 
 ## How it works
 
