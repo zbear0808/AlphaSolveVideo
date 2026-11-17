@@ -79,6 +79,10 @@ def slug(args: List[str]) -> str:
     return "_".join(a.lstrip("-") for a in args) or "default"
 
 
+def flag_value(args: List[str], flag: str) -> Optional[int]:
+    return int(args[args.index(flag) + 1]) if flag in args else None
+
+
 def ffmpeg_values(ffmpeg: str, inputs: List[str], graph: str, files: Dict[str, Path]) -> Dict[str, List[float]]:
     """Run a filter graph whose chains print YAVG to the given metadata files; return the values per file."""
     subprocess.run([ffmpeg, "-nostdin", "-v", "error", *inputs, "-filter_complex", graph, "-map", "[o]",
@@ -180,9 +184,10 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
     info = slp.read_replay(replay)
-    expected = info.last_frame - slp.FIRST_FRAME
+    first, last = slp.clip_range(info, flag_value(args, "--start-frame"), flag_value(args, "--end-frame"))
+    expected = last - first + 1
     res = {"replay": replay.name, "label": entry["label"], "args": args, "expected_frames": expected,
-           "game_seconds": round(info.game_frames / 60, 1)}
+           "game_seconds": round(expected / 60, 1), "mid_match": first > slp.FIRST_FRAME + 1}
     print(f"\n== {replay.name} [{' '.join(args) or 'default'}]: {entry['label']}", flush=True)
 
     t0 = time.monotonic()
@@ -247,8 +252,11 @@ def problems(res: dict) -> List[str]:
     o = res.get("output")
     if o:
         # The first game frame of a match (-122, during "Ready") never reaches the recording, so one frame
-        # less is expected; replays that end in a quit-out can also fill the last frame.
+        # less is expected; replays that end in a quit-out can also fill the last frame. A clip that starts
+        # later has exactly the frames asked for.
         lo, hi = res["expected_frames"] - 1, res["expected_frames"]
+        if res.get("mid_match"):
+            lo = hi
         if o.get("codec") == "gif":  # GIF timing can't do 60 fps: the solver writes 50 fps
             lo, hi = (round(n * 50 / (60000 / 1001)) for n in (lo, hi))
             lo -= 1

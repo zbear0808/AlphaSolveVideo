@@ -37,6 +37,7 @@ The replays were picked to cover:
 - Ice Climbers and Game & Watch;
 - online replays and console (Nintendont) replays;
 - Pokémon Stadium with and without transformations (console tournament setups freeze it);
-- a 12-second quit-out, rendered in every output format.
+- a 12-second quit-out, rendered in every output format;
+- clips: a slice from the middle of a match, one that starts 8,500 frames in (Dolphin fast-forwards to it), and one that runs to the replay's last frame (`--start-frame`, `--end-frame`).
 
 Adding a replay means adding an entry with its Slippi Lab file name (shown in the address bar or in `https://slippilab.com/api/replays`).

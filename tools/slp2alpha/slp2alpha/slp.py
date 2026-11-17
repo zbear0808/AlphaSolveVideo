@@ -63,6 +63,21 @@ def read_replay(path) -> ReplayInfo:
                       last_frame=last, has_game_end=has_end)
 
 
+def clip_range(replay: ReplayInfo, start: Optional[int] = None, end: Optional[int] = None) -> Tuple[int, int]:
+    """First and last game frame (both included) to record; the whole replay unless start or end is given.
+
+    Frame FIRST_FRAME is only where playback starts from, and the frame after it never reaches Dolphin's
+    recording either, so a range that begins there records one frame fewer than it spans. A start before it
+    is clamped, and so is an end past the replay's last frame.
+    """
+    first = FIRST_FRAME + 1 if start is None else max(start, FIRST_FRAME + 1)
+    last = replay.last_frame if end is None else min(end, replay.last_frame)
+    if last < first:
+        raise ReplayError(f"{replay.path.name}: no frames to render from {first} to {last} "
+                          f"(the replay has frames {replay.first_frame} to {replay.last_frame})")
+    return first, last
+
+
 def _scan_events(raw: bytes, name: str) -> Tuple[str, int, Optional[int], Optional[int], bool]:
     if not raw or raw[0] != EVENT_PAYLOAD_SIZES:
         raise ReplayError(f"{name}: event stream does not start with the payload-size table")

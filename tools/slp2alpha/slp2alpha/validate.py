@@ -215,7 +215,11 @@ class QuickReport:
 CHECK_FRAMES = 1200
 
 
-def quick_check(ffmpeg: str, ffprobe: str, video: str) -> QuickReport:
+def quick_check(ffmpeg: str, ffprobe: str, video: str, pairs: Optional[int] = None) -> QuickReport:
+    """pairs: the game frames the recording should hold. Dolphin keeps drawing after a replay's last frame
+    until it is stopped (and the flicker stops with the match), so only the fields up to there are checked."""
     p = probe(ffprobe, video)
-    return QuickReport(p, detect_pairing(ffmpeg, video), _alternation(luma_series(ffmpeg, video, CHECK_FRAMES)),
+    fields = CHECK_FRAMES if pairs is None else min(CHECK_FRAMES, 2 * pairs)
+    detect = PAIRING_PAIRS if pairs is None else min(PAIRING_PAIRS, pairs)
+    return QuickReport(p, detect_pairing(ffmpeg, video, detect), _alternation(luma_series(ffmpeg, video, fields)),
                        timestamp_gaps(ffprobe, video, p.rate))

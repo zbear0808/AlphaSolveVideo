@@ -175,9 +175,19 @@ def _render_codes(args, stage_id: int) -> List[str]:
     return enabled
 
 
+# Dolphin fast-forwards to a clip's start frame without printing progress, so the time it takes has to be
+# allowed for in the boot timeout. It skips about 4000 game frames per second on an M1; assume far less.
+MIN_SKIP_FPS = 200.0
+
+
 def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, ffmpeg: str, ffprobe: str,
                 codes) -> bool:
     replay = slp.read_replay(replay_path)
+    first, last = slp.clip_range(replay, args.start_frame, args.end_frame)
+    is_clip = args.start_frame is not None or args.end_frame is not None
+    if args.end_frame is not None and args.end_frame > replay.last_frame:
+        print(f"{replay_path.name}: note: the replay ends at frame {replay.last_frame}, "
+              f"rendering up to there instead of {args.end_frame}", file=sys.stderr)
     stage = stages.stage_name(replay.stage_id)
     if args.characters_only:
         if replay.stage_id not in stages.CHARACTERS_ONLY_TESTED:
@@ -190,7 +200,8 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
         return False
 
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else replay_path.resolve().parent
-    variant = [label for on, label in ((args.characters_only, "characters only"),
+    variant = [label for on, label in ((is_clip, f"frames {first} to {last}"),
+                                       (args.characters_only, "characters only"),
                                        (args.static_camera, "static camera")) if on]
     name = replay_path.stem + (f" ({', '.join(variant)})" if variant else "")
     work = Path(tempfile.mkdtemp(prefix="slp2alpha-"))
@@ -200,10 +211,19 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     config.write_user_dir(user, codes, enabled=enabled, scale=args.scale, engine=engine,
                           cpu_thread=args.dual_core, debug_logging=args.debug)
     comm = work / "comm.json"
-    # Dolphin records strictly between startFrame and endFrame, so this covers the whole replay.
-    config.write_comm(comm, replay_path, end_frame=replay.last_frame + 1)
+    # Dolphin records strictly between startFrame and endFrame, so these give frames first..last.
+    # A startFrame above the game's first frame makes it fast-forward there (not recorded).
+    start_frame = first - 1
+    config.write_comm(comm, replay_path, start_frame=start_frame, end_frame=last + 1)
+    clip_frames = last - first + 1
+    skip_frames = max(0, start_frame - slp.FIRST_FRAME)
+    boot_timeout = args.boot_timeout + skip_frames / MIN_SKIP_FPS
 
-    print(f"{replay_path.name}: {stage}, {replay.game_frames / 60:.1f} s of gameplay -> {out_dir}")
+    if is_clip:
+        print(f"{replay_path.name}: {stage}, frames {first} to {last} ({clip_frames / 60:.1f} s) "
+              f"of {replay.game_frames / 60:.1f} s -> {out_dir}")
+    else:
+        print(f"{replay_path.name}: {stage}, {replay.game_frames / 60:.1f} s of gameplay -> {out_dir}")
     t_start = time.monotonic()
     printer = _progress_printer("Dolphin")
     progress = {"current": None}
@@ -216,8 +236,8 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
 
     def run():
         try:
-            box["res"] = runner.run_dolphin(dolphin, iso, comm, user, dump, logs, stop_at_frame=replay.last_frame,
-                                            boot_timeout=args.boot_timeout, on_progress=on_progress,
+            box["res"] = runner.run_dolphin(dolphin, iso, comm, user, dump, logs, stop_at_frame=last,
+                                            boot_timeout=boot_timeout, on_progress=on_progress,
                                             grace_seconds=1.0)
         finally:
             dolphin_done.set()
@@ -227,15 +247,16 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
 
     # The flicker code draws every game frame twice. Melee keeps drawing after the last replay frame
     # (e.g. the pause screen after an LRAS quit) until Dolphin is stopped, so only this many pairs count.
-    expected_pairs = replay.last_frame - slp.FIRST_FRAME
+    expected_pairs = clip_frames
 
     # The native build records Matroska, which can be read while it is written: solve alongside Dolphin.
+    # A clip shorter than the lead is solved once Dolphin has finished.
     stream = engine == config.MAINLINE and args.stream
     outputs = None
     if stream:
         while not dolphin_done.is_set():
             current = progress["current"]
-            if current is not None and current >= slp.FIRST_FRAME + STREAM_LEAD_FRAMES and _recordings(dump):
+            if current is not None and current >= start_frame + STREAM_LEAD_FRAMES and _recordings(dump):
                 break
             time.sleep(0.2)
         if not dolphin_done.is_set():
@@ -261,7 +282,7 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
               file=sys.stderr)
     video = str(dumps[0])
 
-    report = validate.quick_check(ffmpeg, ffprobe, video)
+    report = validate.quick_check(ffmpeg, ffprobe, video, expected_pairs)
     for problem in report.problems(expected_frames=2 * expected_pairs):
         print(f"  warning: {problem}", file=sys.stderr)
     if outputs is None:
@@ -272,7 +293,7 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
         print(f"  warning: pairing from the first frames ({pairing.first_color}/{pairing.offset}) differs from "
               f"the full recording's ({report.pairing.first_color}/{report.pairing.offset})", file=sys.stderr)
     t_done = time.monotonic()
-    game_seconds = replay.game_frames / 60
+    game_seconds = clip_frames / 60
     timing = (f"Dolphin and solver together {t_rendered - t_start:.0f} s, then checks {t_done - t_rendered:.0f} s"
               if stream else f"Dolphin {t_rendered - t_start:.0f} s, solve {t_done - t_rendered:.0f} s")
     print(f"  done in {t_done - t_start:.0f} s ({timing}) for {game_seconds:.0f} s of gameplay: "
@@ -287,6 +308,10 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
 
 def cmd_render(args) -> int:
     """Render replays to transparent video: Dolphin records the flicker video, then the alpha solver runs."""
+    if (args.start_frame is not None or args.end_frame is not None) and len(args.replays) > 1:
+        print("error: --start-frame and --end-frame pick frames of one replay; "
+              f"{len(args.replays)} replays were given", file=sys.stderr)
+        return 2
     dolphin = locate.find_dolphin(args.dolphin)
     engine = runner.engine_of(dolphin)
     if engine != config.MAINLINE and not args.allow_window:
@@ -313,6 +338,11 @@ def main(argv=None) -> int:
 
     pr = sub.add_parser("render", help="render replays (.slp) to transparent video")
     pr.add_argument("replays", nargs="+")
+    pr.add_argument("--start-frame", type=int, metavar="FRAME",
+                    help="render only from this game frame on (Slippi's frame numbers, as in `info` and "
+                         "slippi-js stats: the first frame of a game is -123); one replay only")
+    pr.add_argument("--end-frame", type=int, metavar="FRAME",
+                    help="render only up to and including this game frame; one replay only")
     pr.add_argument("--format", default=solve.DEFAULT_FORMAT, choices=sorted(solve.FORMATS),
                     help="output format (default: mov, ProRes 4444 with alpha)")
     pr.add_argument("--out-dir", help="output folder (default: next to each replay)")

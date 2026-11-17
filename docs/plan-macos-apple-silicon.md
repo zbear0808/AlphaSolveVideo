@@ -20,6 +20,7 @@ What exists:
 - **`python3 -m slp2alpha render REPLAY...`** (run from `tools/slp2alpha`). It refuses stages without background-removal codes. It records lossless FFV1 in Matroska and solves while Dolphin is still recording. It writes `fullTransparent - NAME.mov` (ProRes 4444 with alpha) and `alphaMap - NAME.mov` next to the replay, or into `--out-dir`.
 - **`render --characters-only`** doesn't draw the stage (or its particles, the HUD and screen flashes), so it works on every stage and leaves just the fighters, their items and effects. `--hud`, `--hide-items` and `--hide-effects` adjust what's kept. See `docs/characters-only-research.md`, and `docs/stage-backgrounds.md` for what the other legal stages need with the stage visible.
 - **`render --static-camera`** keeps the camera still (Melee's fixed camera, which shows the whole stage, and no screen shake). It can be combined with `--characters-only`. See `docs/static-camera.md`.
+- **`render --start-frame N --end-frame M`** renders only those frames of a replay (Slippi's frame numbers, as in slippi-js combos), for example one combo. Dolphin skips ahead to the start without drawing, about 4,000 game frames per second. See `docs/clips.md`.
 
 Measured on this Mac (M1, 16 GB, other apps running, load average 3–9) [verified]:
 
