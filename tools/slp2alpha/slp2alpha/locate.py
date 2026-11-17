@@ -72,6 +72,20 @@ def find_iso(explicit: Optional[str] = None) -> Path:
     return p
 
 
+def animelee_iso_path() -> Path:
+    """Where tools/animelee/build-iso.sh writes the Animelee ISO."""
+    base = Path.home() / "Library" / "Caches" if sys.platform == "darwin" else Path(
+        os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
+    return base / "AlphaSolveVideo" / "animelee" / "ANIMELEE - COMPLETE EDITION.iso"
+
+
+def find_animelee_iso() -> Path:
+    p = animelee_iso_path()
+    if not p.exists():
+        raise NotFound(f"No Animelee ISO at {p}. Build it with tools/animelee/build-iso.sh.")
+    return p
+
+
 def check_iso(path: Path) -> None:
     """The Gecko codes target NTSC 1.02: game id GALE01, disc revision 2."""
     with open(path, "rb") as f:

@@ -202,7 +202,8 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else replay_path.resolve().parent
     variant = [label for on, label in ((is_clip, f"frames {first} to {last}"),
                                        (args.characters_only, "characters only"),
-                                       (args.static_camera, "static camera")) if on]
+                                       (args.static_camera, "static camera"),
+                                       (args.animelee, "animelee")) if on]
     name = replay_path.stem + (f" ({', '.join(variant)})" if variant else "")
     work = Path(tempfile.mkdtemp(prefix="slp2alpha-"))
     user, logs = work / "user", work / "logs"
@@ -319,7 +320,7 @@ def cmd_render(args) -> int:
               "white (EPILEPSY WARNING). Build the headless one with tools/dolphin-build/build-mac-mainline.sh, "
               "or pass --allow-window to use this build anyway.", file=sys.stderr)
         return 2
-    iso = locate.find_iso(args.iso)
+    iso = locate.find_animelee_iso() if args.animelee else locate.find_iso(args.iso)
     locate.check_iso(iso)
     ffmpeg = locate.find_ffmpeg(args.ffmpeg)
     ffprobe = locate.find_ffmpeg(args.ffmpeg, name="ffprobe")
@@ -362,6 +363,9 @@ def main(argv=None) -> int:
                          "screen shake (fighters look smaller; consider --scale 2)")
     pr.add_argument("--dolphin", help="Slippi playback Dolphin .app or executable (default: packages/)")
     pr.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
+    pr.add_argument("--animelee", action="store_true",
+                    help="render with the Animelee cel-shaded skins: uses the ISO built by "
+                         "tools/animelee/build-iso.sh (consider --scale 2 for cleaner outlines)")
     pr.add_argument("--ffmpeg", help="ffmpeg executable (ffprobe is expected next to it)")
     pr.add_argument("--dual-core", action=argparse.BooleanOptionalAction, default=None,
                     help="override the playback codes' single-core setting (CPUThread)")
