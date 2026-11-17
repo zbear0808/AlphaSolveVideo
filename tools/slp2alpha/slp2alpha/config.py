@@ -34,8 +34,8 @@ FLICKER_CODES = [INPUT_TIMING_CODE, FLICKER_CODE]
 
 # Characters-only renders (Resources/Characters Only Codes.txt): nothing of the stage is drawn, so no
 # background codes are needed and every stage works. All of these only change what is drawn.
-HIDE_STAGE_CODES = ["Hide Stage - Characters Only", "Hide Stage Particles", "Hide Screen Flash",
-                    "Hide Shy Guys (Yoshi's Story)"]
+HIDE_SHY_GUYS_CODE = "Hide Shy Guys (Yoshi's Story)"
+HIDE_STAGE_CODES = ["Hide Stage - Characters Only", "Hide Stage Particles", "Hide Screen Flash", HIDE_SHY_GUYS_CODE]
 HIDE_HUD_CODE = "Hide HUD and Overlays"
 HIDE_ITEMS_CODE = "Hide Items and Projectiles"
 HIDE_EFFECTS_CODE = "Hide Effects"
@@ -98,7 +98,8 @@ def _ishiiruka_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: 
 
 
 def _mainline_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: Optional[bool],
-                   video_backend: Optional[str]) -> Tuple[OrderedDict, OrderedDict, List[str]]:
+                   video_backend: Optional[str], custom_textures: bool = False
+                   ) -> Tuple[OrderedDict, OrderedDict, List[str]]:
     core = OrderedDict([
         ("GFXBackend", video_backend or "Metal"),
         ("EmulationSpeed", "0"),  # unthrottled
@@ -126,7 +127,7 @@ def _mainline_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: O
             ("DumpFormat", "mkv"),   # FFV1 in Matroska; readable while it is still being written
             ("DumpCodec", "ffv1"),
             ("ShowFPS", "False"),
-        ])),
+        ] + ([("HiresTextures", "True")] if custom_textures else []))),  # load Load/Textures/GALE01/*.png
         # Present at each VI field (not on XFB copy), so every frame lands on the exact 1/60 s grid.
         ("Hacks", OrderedDict([("ImmediateXFBEnable", "False")])),
         ("Hardware", OrderedDict([("VSync", "False")])),
@@ -148,17 +149,24 @@ def write_user_dir(
     debug_logging: bool = False,
     engine: str = ISHIIRUKA,
     cpu_thread: Optional[bool] = None,
+    custom_textures: Optional[Dict[str, bytes]] = None,
 ) -> None:
     """Write Config/Dolphin.ini, Config/GFX.ini and GameSettings/GALE01.ini under user_dir.
 
     cpu_thread overrides the playback codes' "CPUThread = False" (single core) for this game.
+    custom_textures: PNG data by Dolphin's name for the texture it replaces (mainline build only).
     """
+    if custom_textures and engine != MAINLINE:
+        raise ValueError("custom textures need the mainline build: the Ishiiruka build names textures differently")
     user_dir = Path(user_dir)
     (user_dir / "Config").mkdir(parents=True, exist_ok=True)
     (user_dir / "GameSettings").mkdir(parents=True, exist_ok=True)
 
-    make = _mainline_inis if engine == MAINLINE else _ishiiruka_inis
-    dolphin, gfx, log_names = make(scale, record, cpu_core, fastmem, video_backend)
+    if engine == MAINLINE:
+        dolphin, gfx, log_names = _mainline_inis(scale, record, cpu_core, fastmem, video_backend,
+                                                 bool(custom_textures))
+    else:
+        dolphin, gfx, log_names = _ishiiruka_inis(scale, record, cpu_core, fastmem, video_backend)
     (user_dir / "Config" / "Dolphin.ini").write_text(_ini(dolphin), encoding="utf-8")
     (user_dir / "Config" / "GFX.ini").write_text(_ini(gfx), encoding="utf-8")
 
@@ -181,6 +189,12 @@ def write_user_dir(
     game_ini += [f"${name}" for name in enabled]
     game_ini += ["[Gecko_Disabled]"] + [f"${name}" for name in disabled]
     (user_dir / "GameSettings" / "GALE01.ini").write_text("\n".join(game_ini) + "\n", encoding="utf-8")
+
+    if custom_textures:
+        folder = user_dir / "Load" / "Textures" / "GALE01"
+        folder.mkdir(parents=True, exist_ok=True)
+        for name, png in custom_textures.items():
+            (folder / f"{name}.png").write_bytes(png)
 
 
 def dump_dir_for(engine: str, user_dir: Path, requested: Path) -> Path:

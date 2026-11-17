@@ -76,7 +76,7 @@ def fetch(source: str, name: str) -> Path:
 
 
 def slug(args: List[str]) -> str:
-    return "_".join(a.lstrip("-") for a in args) or "default"
+    return "_".join((Path(a).name if "/" in a else a).lstrip("-") for a in args) or "default"
 
 
 def flag_value(args: List[str], flag: str) -> Optional[int]:
@@ -191,8 +191,9 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
     print(f"\n== {replay.name} [{' '.join(args) or 'default'}]: {entry['label']}", flush=True)
 
     t0 = time.monotonic()
+    cli_args = [a.replace("{tests}", str(HERE)) for a in args]  # {tests}: this folder, for files kept next to run.py
     p = subprocess.run([sys.executable, "-m", "slp2alpha", "render", str(replay), "--out-dir", str(out_dir),
-                        "--keep", *args], cwd=SLP2ALPHA, capture_output=True, text=True)
+                        "--keep", *cli_args], cwd=SLP2ALPHA, capture_output=True, text=True)
     res["seconds"] = round(time.monotonic() - t0, 1)
     text = (p.stdout + "\n" + p.stderr).replace("\r", "\n")
     lines = [ln.rstrip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("Dolphin: frame")]

@@ -12,9 +12,9 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
-from . import config, gecko, locate, runner, slp, solve, stages, validate
+from . import config, gecko, locate, runner, shyguy, slp, solve, stages, validate
 
 
 def cmd_info(args) -> int:
@@ -156,11 +156,11 @@ def _recordings(dump: Path) -> List[Path]:
 STREAM_LEAD_FRAMES = validate.PAIRING_PAIRS + 30
 
 
-def _render_codes(args, stage_id: int) -> List[str]:
-    """Gecko codes to enable for one render."""
+def _render_codes(args, stage_id: int, sprite: bool = False) -> List[str]:
+    """Gecko codes to enable for one render. sprite: the Shy Guys are drawn (with the --shy-guy-sprite image)."""
     enabled = list(config.FLICKER_CODES)
     if args.characters_only:
-        enabled += config.HIDE_STAGE_CODES
+        enabled += [c for c in config.HIDE_STAGE_CODES if not (sprite and c == config.HIDE_SHY_GUYS_CODE)]
         if args.hide_items:
             enabled.append(config.HIDE_ITEMS_CODE)
         if args.hide_effects:
@@ -181,7 +181,7 @@ MIN_SKIP_FPS = 200.0
 
 
 def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, ffmpeg: str, ffprobe: str,
-                codes) -> bool:
+                codes, sprite: Optional[shyguy.Sprite] = None) -> bool:
     replay = slp.read_replay(replay_path)
     first, last = slp.clip_range(replay, args.start_frame, args.end_frame)
     is_clip = args.start_frame is not None or args.end_frame is not None
@@ -199,18 +199,25 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
               "--characters-only works on every stage)", file=sys.stderr)
         return False
 
+    if sprite and replay.stage_id != shyguy.STAGE_ID:
+        print(f"{replay_path.name}: note: {stage} has no Shy Guys, so --shy-guy-sprite does nothing here",
+              file=sys.stderr)
+        sprite = None
+
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else replay_path.resolve().parent
     variant = [label for on, label in ((is_clip, f"frames {first} to {last}"),
                                        (args.characters_only, "characters only"),
                                        (args.static_camera, "static camera"),
-                                       (args.animelee, "animelee")) if on]
+                                       (args.animelee, "animelee"),
+                                       (sprite, "shy guy sprite")) if on]
     name = replay_path.stem + (f" ({', '.join(variant)})" if variant else "")
     work = Path(tempfile.mkdtemp(prefix="slp2alpha-"))
     user, logs = work / "user", work / "logs"
     dump = config.dump_dir_for(engine, user, work / "dump")
-    enabled = _render_codes(args, replay.stage_id)
+    enabled = _render_codes(args, replay.stage_id, sprite is not None)
     config.write_user_dir(user, codes, enabled=enabled, scale=args.scale, engine=engine,
-                          cpu_thread=args.dual_core, debug_logging=args.debug)
+                          cpu_thread=args.dual_core, debug_logging=args.debug,
+                          custom_textures=sprite.textures if sprite else None)
     comm = work / "comm.json"
     # Dolphin records strictly between startFrame and endFrame, so these give frames first..last.
     # A startFrame above the game's first frame makes it fast-forward there (not recorded).
@@ -313,8 +320,18 @@ def cmd_render(args) -> int:
         print("error: --start-frame and --end-frame pick frames of one replay; "
               f"{len(args.replays)} replays were given", file=sys.stderr)
         return 2
+    if args.shy_guy_sprite:
+        problem = ("it needs --characters-only (Yoshi's Story can't be rendered with its stage showing)"
+                   if not args.characters_only else
+                   "Shy Guys are items, which --hide-items hides" if args.hide_items else None)
+        if problem:
+            print(f"error: --shy-guy-sprite can't be used like this: {problem}", file=sys.stderr)
+            return 2
     dolphin = locate.find_dolphin(args.dolphin)
     engine = runner.engine_of(dolphin)
+    if args.shy_guy_sprite and engine != config.MAINLINE:
+        print("error: --shy-guy-sprite needs the headless mainline build", file=sys.stderr)
+        return 2
     if engine != config.MAINLINE and not args.allow_window:
         print(f"error: {dolphin} is not the headless build: it would open a window that flashes black and "
               "white (EPILEPSY WARNING). Build the headless one with tools/dolphin-build/build-mac-mainline.sh, "
@@ -325,7 +342,12 @@ def cmd_render(args) -> int:
     ffmpeg = locate.find_ffmpeg(args.ffmpeg)
     ffprobe = locate.find_ffmpeg(args.ffmpeg, name="ffprobe")
     codes = gecko.load_codes(*(locate.RESOURCES / f for f in config.CODE_FILES))
-    ok = [_render_one(args, Path(r), dolphin, engine, iso, ffmpeg, ffprobe, codes) for r in args.replays]
+    sprite = None
+    if args.shy_guy_sprite:
+        sprite = shyguy.load(ffmpeg, ffprobe, Path(args.shy_guy_sprite).expanduser(), iso, args.scale,
+                             args.static_camera)
+        print(f"Shy Guy sprite: {args.shy_guy_sprite} as {sprite.size[0]}x{sprite.size[1]} ({sprite.variant})")
+    ok = [_render_one(args, Path(r), dolphin, engine, iso, ffmpeg, ffprobe, codes, sprite) for r in args.replays]
     return 0 if all(ok) else 1
 
 
@@ -361,6 +383,10 @@ def main(argv=None) -> int:
     pr.add_argument("--static-camera", action="store_true",
                     help="keep the camera still: Melee's fixed camera, which shows the whole stage, without "
                          "screen shake (fighters look smaller; consider --scale 2)")
+    pr.add_argument("--shy-guy-sprite", metavar="IMAGE",
+                    help="Yoshi's Story, with --characters-only: draw the Shy Guys with this image instead of "
+                         "the game's art (PNG with transparency works best). It is fitted inside the Shy Guy's "
+                         "square and moves with it, mirrored when it faces left (docs/shy-guy-sprite.md)")
     pr.add_argument("--dolphin", help="Slippi playback Dolphin .app or executable (default: packages/)")
     pr.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
     pr.add_argument("--animelee", action="store_true",
@@ -403,7 +429,7 @@ def main(argv=None) -> int:
     args = p.parse_args(argv)
     try:
         return args.func(args)
-    except (locate.NotFound, slp.ReplayError, KeyError, subprocess.CalledProcessError) as e:
+    except (locate.NotFound, slp.ReplayError, shyguy.SpriteError, KeyError, subprocess.CalledProcessError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

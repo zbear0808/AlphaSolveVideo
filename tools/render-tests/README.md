@@ -8,7 +8,7 @@ python3 tools/render-tests/run.py --only PS FoD   # replays whose file name or l
 python3 tools/render-tests/run.py --quick         # skip the whole-recording pairing check
 ```
 
-Each replay is rendered once per entry in its `"renders"` list, e.g. `[]` for a default render or `["--characters-only", "--static-camera"]`. For each render, the harness checks that:
+Each replay is rendered once per entry in its `"renders"` list, e.g. `[]` for a default render or `["--characters-only", "--static-camera"]`. `{tests}` in an argument stands for this folder, so a render can use a file kept next to `run.py` (`shy-guy-sprite.png`, a test image for `--shy-guy-sprite`). For each render, the harness checks that:
 
 - the render succeeds and prints no warnings;
 - the transparent video and the alpha map have one frame per game frame. The match's first frame (during "Ready") never reaches Dolphin's recording, so one frame fewer is expected.
