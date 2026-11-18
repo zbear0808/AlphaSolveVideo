@@ -7,7 +7,8 @@ What was done, and what changed from this plan while doing it:
 - **The build script is Python, not PowerShell:** `tools/dolphin-build/build-windows-mainline.py`. slp2alpha needs Python on Windows anyway, and the script's fetch and patch steps ran on the Mac. It loads the compiler environment itself (`vcvars64.bat`, found with `vswhere`) when `cl.exe` isn't on the PATH. Appendix A lists where each part is.
 - **The workflow** is `.github/workflows/dolphin-windows.yml`. It runs only when started by hand, so a push never starts a 30-minute build.
 - **The FFmpeg (F1) is pinned:** BtbN's month-end build of 31 October 2026, `ffmpeg-n8.1.3-27-g8dca1586f4-win64-lgpl-shared-8.1.zip`, SHA-256 `5cef7bc4…56ab`. Its `avformat-62.dll` has the Matroska muxer and `avcodec-62.dll` the FFV1 encoder. Its `.def` files export only functions, no data, which keeps linking with MSVC simple [verified: the zip's contents].
-- **Patches.** 0004 now initializes `ok`, and 0005 adds the Ctrl+Break handler. The Mac build applies all five, and its camera export is unchanged: identical samples before and after [verified].
+- **Patches.** 0004 now initializes `ok`, and 0005 adds the Ctrl+Break handler. The Mac build applies them all, and its camera export is unchanged: identical samples before and after [verified].
+- **The first CI run (18 November) compiled everything** with MSVC, the patches included, then failed to link. NoGUI's CMake links the system zlib by name (`z`), and Windows has no `z.lib`; Slippi's CI never builds NoGUI, so it never met this. Patch 0006 links `z` everywhere except Windows. On the Mac the build is unchanged [verified].
 - **Detecting applied patches** changed in both build scripts. A patch only reverse-checks on its own while nothing is applied on top of it. Since 0004 edits lines next to 0002's, `build-mac-mainline.sh fetch`, `configure` and `all` stopped with an error on an already-patched tree [verified]. That didn't show, because only `build` and `bundle` had run since. Both scripts now look for the last patch that reverse-checks, and apply the ones after it.
 - **slp2alpha also stops Dolphin when it exits**, for example after Ctrl+C. Renders run Dolphin on a worker thread, whose clean-up doesn't run at exit, and Dolphin is in its own process group, so the Ctrl+C doesn't reach it. On the Mac it died anyway, from a broken pipe on its next progress line [verified]. On Windows a broken pipe doesn't end a program, so it would have kept running [estimate]. On the Mac, the recording now gets a clean end too [verified].
 - **`render --backend`** picks the video backend: `D3D12` or `Vulkan` if Direct3D 11 can't record without a window.
@@ -46,7 +47,7 @@ Evidence tags:
 
 | Piece | macOS (works today) | Windows |
 |---|---|---|
-| Dolphin source | `c5f6359` plus patches 0001–0004 | The same, plus 0005 |
+| Dolphin source | `c5f6359` plus patches 0001–0004 | The same, plus 0005 and 0006 |
 | Compiler | AppleClang | MSVC 2022 with `/W4 /WX`, so every warning is an error (section 3.7) |
 | Rust | 1.88.0 | 1.88.0, `x86_64-pc-windows-msvc` |
 | FFmpeg inside Dolphin | Our FFmpeg 8.1.3 dylibs (AVI, Matroska and MOV muxers) | The bundled FFmpeg has no Matroska, so BtbN's FFmpeg 8.1 DLLs instead |

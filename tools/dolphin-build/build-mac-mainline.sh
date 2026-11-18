@@ -7,8 +7,8 @@
 #
 # Source: project-slippi/dolphin, branch fix/mainline-playback (PR #40), pinned below, plus
 # tools/dolphin-build/patches-mainline/*.patch (--cout progress markers, frame-dump gating, clang fix,
-# --camera-out for the camera export, and a clean stop on Windows). build-windows-mainline.py is the
-# Windows counterpart.
+# --camera-out for the camera export, and Windows fixes: a clean stop on Ctrl+Break, no system zlib).
+# build-windows-mainline.py is the Windows counterpart.
 #
 # Usage: build-mac-mainline.sh [fetch|configure|build|bundle|all]   (default: all)
 # Environment:

@@ -24,7 +24,7 @@ Evidence tags, as in the other plans:
 
 Already done on the Mac, so not repeated here [verified]:
 
-- The Mac still builds with all five patches, and renders the same way:
+- The Mac still builds with all the patches, and renders the same way:
   - its Dolphin config files are byte-identical to before;
   - its camera export has identical samples;
   - the render tests measure the same transparency and pairing values.
