@@ -42,6 +42,7 @@ Design specifications and cross-platform planning:
 | **[Windows Automation Plan](plan-windows.md)** | Scoping, architecture, and effort estimate for one-command automation on Windows with Slippi's official (Ishiiruka) playback build. |
 | **[Windows: Mainline Build and Camera Export](plan-windows-mainline.md)** | Building the patched headless mainline Dolphin for Windows (GitHub Actions or locally), and the slp2alpha changes, so `--export-camera` and window-free renders work there. Partly implemented. |
 | **[Windows: Remaining Work](plan-windows-remaining.md)** | What's left to do on a Windows machine, in order: build the package, the first render, the camera export against the Mac's, the render tests. |
+| **[Linux: Mainline Build and GitHub Actions](plan-linux.md)** | Building the headless mainline Dolphin for Linux (x86_64 and arm64) on GitHub Actions, the slp2alpha changes, and testing it all in Docker on a Mac. Plan. |
 | **[Camera Export: Dolphin Patch](plan-camera-export-dolphin.md)** | Reading the game camera in Dolphin on every recorded frame and writing `camera - NAME.json` (`render --export-camera`). |
 | **[Camera Export: Blender Importer](plan-camera-export-blender.md)** | An animated Blender camera that matches the rendered video frame for frame. |
 | **[Camera Export: Validation](plan-camera-export-validation.md)** | Checks that the exported camera is what the game drew with, on the right frames, and that Blender reproduces it. |

@@ -152,4 +152,5 @@ Then a path with a space and a non-ASCII character: copy the replay to, for exam
 | The logo stage on Windows | Its Blender lookup now finds Windows installs, but it's untested there, and its own open findings remain |
 | `slp2alpha bench` | Its CPU sampling is macOS-only and is skipped elsewhere |
 | Ishiiruka (Slippi's official build) through slp2alpha | Its stop by WM_CLOSE is written but untested. It opens a flashing window, so it needs `--allow-window` |
-| Windows on ARM, Linux | No build script |
+| Windows on ARM | No build script |
+| Linux | Planned in [`plan-linux.md`](plan-linux.md) |
