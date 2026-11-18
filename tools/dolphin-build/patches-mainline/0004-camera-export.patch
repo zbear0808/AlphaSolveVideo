@@ -56,7 +56,7 @@ index bcf5bc2..b38db3c 100644
  #endif
 diff --git a/Source/Core/Core/Slippi/SlippiCameraExport.cpp b/Source/Core/Core/Slippi/SlippiCameraExport.cpp
 new file mode 100644
-index 0000000..e6d6b21
+index 0000000..ec53087
 --- /dev/null
 +++ b/Source/Core/Core/Slippi/SlippiCameraExport.cpp
 @@ -0,0 +1,217 @@
@@ -236,7 +236,7 @@ index 0000000..e6d6b21
 +    return;
 +
 +  Row r;
-+  bool ok;
++  bool ok = false;
 +  {
 +    const Core::CPUThreadGuard guard(system);
 +    ok = Read(guard, &r);

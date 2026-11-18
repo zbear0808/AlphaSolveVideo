@@ -6,8 +6,9 @@
 # no window at all (-p headless), so renders happen in the background.
 #
 # Source: project-slippi/dolphin, branch fix/mainline-playback (PR #40), pinned below, plus
-# tools/dolphin-build/patches-mainline/*.patch (--cout progress markers, frame-dump gating, clang fix, and
-# --camera-out, the camera export).
+# tools/dolphin-build/patches-mainline/*.patch (--cout progress markers, frame-dump gating, clang fix,
+# --camera-out for the camera export, and a clean stop on Windows). build-windows-mainline.py is the
+# Windows counterpart.
 #
 # Usage: build-mac-mainline.sh [fetch|configure|build|bundle|all]   (default: all)
 # Environment:
@@ -58,14 +59,23 @@ fetch() {
 }
 
 apply_patches() {
-  for p in "$PATCHES"/*.patch; do
-    [ -e "$p" ] || continue
-    if git -C "$SRC" apply --reverse --check "$p" 2>/dev/null; then
-      echo "already applied: $(basename "$p")"
-    else
-      log "Applying $(basename "$p")"
-      git -C "$SRC" apply "$p"
-    fi
+  # Patches go on in order, so the tree has the first k of them. The last of those has nothing on top, so
+  # it reverse-checks on its own (an earlier one may not, once a later patch edits lines next to its own).
+  # The rest go on one by one.
+  local patches=() p i k=0
+  for p in "$PATCHES"/*.patch; do [ -e "$p" ] && patches+=("$p"); done
+  for (( i = ${#patches[@]}; i > 0; i-- )); do
+    if git -C "$SRC" apply --reverse --check "${patches[i - 1]}" 2>/dev/null; then k=$i; break; fi
+  done
+  for (( i = 0; i < k; i++ )); do echo "already applied: $(basename "${patches[i]}")"; done
+  for p in ${patches[@]+"${patches[@]:k}"}; do
+    log "Applying $(basename "$p")"
+    git -C "$SRC" apply "$p" || {
+      echo "ERROR: $(basename "$p") doesn't apply to $SRC: it has changes the patches don't expect"
+      echo "(an older version of a patch, or edits). Undo them, then run this again:"
+      echo "  git -C \"$SRC\" checkout -- . && git -C \"$SRC\" clean -fd Source && git -C \"$SRC\" submodule foreach --recursive git checkout -- ."
+      exit 1
+    }
   done
 }
 
