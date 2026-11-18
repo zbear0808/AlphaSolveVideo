@@ -18,8 +18,8 @@ jobs:
     steps:
       - name: Keep LF line endings (the patches need them)
         run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
       - name: Load the MSVC x64 environment
@@ -31,14 +31,14 @@ jobs:
       - name: Build
         run: python tools/dolphin-build/build-windows-mainline.py all
       - name: Upload the package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: slippi-playback-mainline-windows
           path: packages/slippi-playback-mainline
           if-no-files-found: error
       - name: Upload the build logs
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: build-logs
           path: C:\asv\*.log
