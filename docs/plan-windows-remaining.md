@@ -1,6 +1,6 @@
 # Windows: the remaining work, on a Windows machine
 
-Status: plan, November 2026. The code is prepared for Windows: [`plan-windows-mainline.md`](plan-windows-mainline.md) has what was done and why. None of it has run on Windows yet. This is what's left, in order. Step 1 needs only GitHub; the rest need a Windows PC with a GPU.
+Status: plan, November 2026. Step 1 is done: the Windows package builds on GitHub Actions (section 2). Nothing has rendered on Windows yet. [`plan-windows-mainline.md`](plan-windows-mainline.md) has what was done and why. The rest of this plan, in order, needs a Windows PC with a GPU.
 
 Evidence tags, as in the other plans:
 
@@ -14,46 +14,54 @@ Evidence tags, as in the other plans:
 
 | Step | Where | Effort | Done when |
 |---|---|---|---|
-| 1. Build the Windows package | GitHub Actions (or the PC) | 0.5–1 day, most of it waiting for builds | The zip exists, and its `--help` lists `--camera-out` |
+| 1. Build the Windows package | GitHub Actions (or the PC) | Done, 18 November | The zip exists, and its `--help` lists `--camera-out` |
 | 2. Set up the PC | PC | 0.5 hour | Section 3's list is installed |
 | 3. First render | PC | 0.25 day | Every row of section 4's table holds |
 | 4. The camera export | PC | 0.25–0.5 day | The Windows export equals the Mac's; the checks pass |
 | 5. Render tests and a long game | PC | 0.25 day, plus about an hour of rendering | All entries pass, except `--format hevc` (SKIP) |
 | 6. Write down the results | Anywhere | 0.25 day | The docs say what works on Windows |
-| **Total** | | **1.5–2.5 days** | |
+| **Left** | | **1–1.5 days** | |
 
-Already done on the Mac, so not repeated here [verified]:
+Already done, so not repeated here [verified]:
 
-- The Mac still builds with all the patches, and renders the same way:
+- **The Windows package builds on GitHub Actions** (run 44249312252, `windows-2022`):
+  - The build step took 14.5 minutes.
+  - MSVC 19.44 compiled all of Dolphin and the six patches. There were no warnings at all in Dolphin's own sources (`Source\`).
+  - The bundle step's checks passed: every DLL is in the package or in Windows, and `--help` lists `--cout`, `--camera-out` and `--hide-seekbar`.
+  - The package is 147 MB unpacked: the program (12 MB, a 64-bit console program), the Rust DLL, five FFmpeg DLLs (128 MB), the Visual C++ runtime, and `Sys\` with the playback Gecko codes.
+  - The first run had failed to link (no `z.lib` on Windows), which patch 0006 fixed.
+- **The Mac still builds with all the patches, and renders the same way:**
   - its Dolphin config files are byte-identical to before;
   - its camera export has identical samples;
   - the render tests measure the same transparency and pairing values.
-- The Windows build script's `fetch` and patch steps work. Its `configure`, `build` and `bundle` steps refuse to run off Windows.
-- `tools/animelee/build_iso.py` builds a byte-identical Animelee ISO.
+- **The Windows build script's `fetch` and patch steps work.** Its `configure`, `build` and `bundle` steps refuse to run off Windows.
+- **`tools/animelee/build_iso.py`** builds a byte-identical Animelee ISO.
 
 ## 2. Step 1: build the package
+
+Done. The zip from run [44249312252](https://github.com/zbear0808/AlphaSolveVideo/actions/runs/44249312252) can be downloaded until mid-February 2027: GitHub keeps artifacts for 90 days. After that, or after a patch changes, build it again as below.
 
 ### 2.1 On GitHub (recommended)
 
 1. **Turn on Actions** in the fork's Actions tab, if they're off. Forks start with them off.
-2. **Start the build:** Actions, then "Windows playback Dolphin", then Run workflow. From a terminal: `gh workflow run dolphin-windows.yml`, then `gh run watch`. It takes about 30 minutes [estimate: Slippi's own Windows build of this commit took 26.3 minutes].
+2. **Start the build:** Actions, then "Windows playback Dolphin", then Run workflow. From a terminal: `gh workflow run dolphin-windows.yml`, then `gh run watch`. It takes about 15 minutes [verified: 14.5 minutes for the build step].
 3. **Get the result:** download the `slippi-playback-mainline-windows` artifact from the run's page, or run `gh run download --name slippi-playback-mainline-windows --dir packages/slippi-playback-mainline` on the PC.
 
-If it fails, the `build-logs` artifact has `mainline-configure.log` and `mainline-build.log`. The likely failures, in the order the build meets them:
+If a later build fails (after a patch changes, or on a newer runner image), the `build-logs` artifact has `mainline-configure.log` and `mainline-build.log`. The likely failures, in the order the build meets them:
 
 | Where | Symptom | What to do |
 |---|---|---|
 | Patches | "doesn't apply", or "has Windows (CRLF) line endings" | On a fresh runner neither should happen; the message says how to reset the checkout |
 | Configure | "CMake did not find FFmpeg", or "found another FFmpeg" | `FFMPEG_DIR` isn't reaching CMake's `FindFFmpeg.cmake` |
 | Compile | An MSVC warning in a patch, which `/WX` makes an error (file and line in the log) | Fix it in the patch (below), then run the workflow again |
-| Compile | FFmpeg 8.1's headers under MSVC | Use option F2 instead (plan-windows-mainline.md, section 3.3) |
-| Link | Unresolved `av_*` symbols, from the MinGW-built import libraries | F2 as well |
+| Compile or link | FFmpeg's headers under MSVC, or unresolved `av_*` symbols. Neither happened with FFmpeg 8.1 | Use option F2 instead (plan-windows-mainline.md, section 3.3) |
+| Link | "cannot open input file", e.g. `z.lib` in the first build | A library name that exists only on macOS and Linux; patch 0006 is the example |
 | Bundle | "DLLs that are neither in the package nor in Windows", or `--help` fails | The message names the DLL or the missing option |
 
 **Fixing a patch from the Mac:**
 
 1. Edit the file in `~/Library/Caches/AlphaSolveVideo/mainline`.
-2. Regenerate the patch from a worktree of the pinned commit. Apply the patches before it, copy in the edited files, and `git diff`: the same steps that made 0004 and 0005.
+2. Regenerate the patch from a worktree of the pinned commit. Apply the patches before it, copy in the edited files, and `git diff`: the same steps that made 0004 to 0006.
 3. Check the Mac still builds: `build-mac-mainline.sh build` and `bundle`.
 4. Push, and run the workflow again.
 

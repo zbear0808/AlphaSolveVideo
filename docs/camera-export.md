@@ -10,7 +10,7 @@ blender -b --python tools/camera-export/import_melee_camera.py -- "camera - game
     --save game-camera.blend
 ```
 
-It works with the other options (`--characters-only`, `--static-camera`, `--start-frame`, `--scale`, `--animelee`), except `--format gif`. It needs the headless Dolphin build with the camera patch: `render` says so when the build is too old, and `tools/dolphin-build/build-mac-mainline.sh` builds it. On Windows, `tools/dolphin-build/build-windows-mainline.py` (or the "Windows playback Dolphin" GitHub Actions workflow) builds it, but that hasn't run yet: [`plan-windows-remaining.md`](plan-windows-remaining.md).
+It works with the other options (`--characters-only`, `--static-camera`, `--start-frame`, `--scale`, `--animelee`), except `--format gif`. It needs the headless Dolphin build with the camera patch: `render` says so when the build is too old, and `tools/dolphin-build/build-mac-mainline.sh` builds it. On Windows, `tools/dolphin-build/build-windows-mainline.py` (run by the "Windows playback Dolphin" GitHub Actions workflow) builds it, but it hasn't rendered there yet: [`plan-windows-remaining.md`](plan-windows-remaining.md).
 
 ## Only when asked
 

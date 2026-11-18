@@ -27,7 +27,7 @@ python3 -m slp2alpha render replay.slp --characters-only
 - **Documentation & Research:** See the [**Documentation Index**](docs/README.md) for feature guides, reverse engineering research, and architecture plans.
 - **Testing:** See [`tools/render-tests/`](tools/render-tests/README.md) for the regression test harness.
 - **Reverse Engineering & Probes:** See [`research/`](research/README.md) for calibration and probe tools.
-- **Windows:** the code is prepared for it, but nothing has run there yet. The Windows build is [`tools/dolphin-build/build-windows-mainline.py`](tools/dolphin-build/build-windows-mainline.py), or the "Windows playback Dolphin" GitHub Actions workflow, and [`docs/plan-windows-remaining.md`](docs/plan-windows-remaining.md) lists what's left to try on a Windows PC.
+- **Windows:** the Windows build of the headless Dolphin works: [`tools/dolphin-build/build-windows-mainline.py`](tools/dolphin-build/build-windows-mainline.py), run by the "Windows playback Dolphin" GitHub Actions workflow. Nothing has rendered on Windows yet; [`docs/plan-windows-remaining.md`](docs/plan-windows-remaining.md) lists what's left to try on a Windows PC.
 
 ## Classic Manual Workflow (Windows Batch Scripts)
 Download the latest release zip from the [releases page](https://github.com/NeilHarbin0/AlphaSolveVideo/releases). Extract the zip to preferably a dedicated folder. 

@@ -1,6 +1,6 @@
 # Windows: the patched mainline Dolphin and the camera export
 
-Status: partly implemented, November 2026. Everything that doesn't need a Windows machine is done, but nothing has run on Windows yet: no Windows PC was available, so everything that needs Windows to run is [to test] or [estimate]. [`plan-windows-remaining.md`](plan-windows-remaining.md) has the work that's left, in order. The source facts come from the pinned Dolphin checkout (`~/Library/Caches/AlphaSolveVideo/mainline`, commit `c5f6359`, with this repo's patches applied).
+Status: partly implemented, November 2026. Everything that doesn't need a Windows PC is done, and the Windows package builds on GitHub Actions. Nothing has rendered on Windows yet: no Windows PC was available, so everything that needs a render there is [to test] or [estimate]. [`plan-windows-remaining.md`](plan-windows-remaining.md) has the work that's left, in order. The source facts come from the pinned Dolphin checkout (`~/Library/Caches/AlphaSolveVideo/mainline`, commit `c5f6359`, with this repo's patches applied).
 
 What was done, and what changed from this plan while doing it:
 
@@ -9,6 +9,11 @@ What was done, and what changed from this plan while doing it:
 - **The FFmpeg (F1) is pinned:** BtbN's month-end build of 31 October 2026, `ffmpeg-n8.1.3-27-g8dca1586f4-win64-lgpl-shared-8.1.zip`, SHA-256 `5cef7bc4…56ab`. Its `avformat-62.dll` has the Matroska muxer and `avcodec-62.dll` the FFV1 encoder. Its `.def` files export only functions, no data, which keeps linking with MSVC simple [verified: the zip's contents].
 - **Patches.** 0004 now initializes `ok`, and 0005 adds the Ctrl+Break handler. The Mac build applies them all, and its camera export is unchanged: identical samples before and after [verified].
 - **The first CI run (18 November) compiled everything** with MSVC, the patches included, then failed to link. NoGUI's CMake links the system zlib by name (`z`), and Windows has no `z.lib`; Slippi's CI never builds NoGUI, so it never met this. Patch 0006 links `z` everywhere except Windows. On the Mac the build is unchanged [verified].
+- **The second run built the package** (run 44249312252) [verified]:
+  - The build step took 14.5 minutes.
+  - There were no MSVC warnings in Dolphin's own sources.
+  - The prebuilt FFmpeg 8.1 linked with MSVC, so F2 isn't needed.
+  - The bundle step's DLL and `--help` checks passed.
 - **Detecting applied patches** changed in both build scripts. A patch only reverse-checks on its own while nothing is applied on top of it. Since 0004 edits lines next to 0002's, `build-mac-mainline.sh fetch`, `configure` and `all` stopped with an error on an already-patched tree [verified]. That didn't show, because only `build` and `bundle` had run since. Both scripts now look for the last patch that reverse-checks, and apply the ones after it.
 - **slp2alpha also stops Dolphin when it exits**, for example after Ctrl+C. Renders run Dolphin on a worker thread, whose clean-up doesn't run at exit, and Dolphin is in its own process group, so the Ctrl+C doesn't reach it. On the Mac it died anyway, from a broken pipe on its next progress line [verified]. On Windows a broken pipe doesn't end a program, so it would have kept running [estimate]. On the Mac, the recording now gets a clean end too [verified].
 - **`render --backend`** picks the video backend: `D3D12` or `Vulkan` if Direct3D 11 can't record without a window.
@@ -121,7 +126,7 @@ cmake --build %SRC%\build --target dolphin-nogui
 - **Configure check.** The configure log must say "libav/ffmpeg found, enabling AVI frame dumps", and the `avcodec` it found must be ours. The Mac script checks the first.
 - **Output.** Windows builds put their programs in the *source* tree, `Binary\x64\` (`CMakeLists.txt:208–215`), not in `build\`. The program is `dolphin-emu-nogui.exe` [verified].
 - **The Rust DLL.** `slippi_rust_extensions` is a `cdylib` [verified], so the program needs `slippi_rust_extensions.dll` next to it. The `copy_rust_dll` target copies it from `build\cargo\build\x86_64-pc-windows-msvc\release\` (`CMakeLists.txt:636–647`) [verified]. Either build that target too, or copy the DLL in the bundle step.
-- **Time.** Slippi's Qt build took 26.3 minutes on a CI runner, checkout included [verified]. NoGUI has less GUI code to compile [estimate: 20–30 minutes in CI, 10–20 minutes locally on 8 or more cores].
+- **Time.** Slippi's Qt build took 26.3 minutes on a CI runner, checkout included [verified]. The NoGUI build's build step took 14.5 minutes on CI [verified].
 
 ### 3.5 The package
 
@@ -284,8 +289,8 @@ If Direct3D 11 records nothing without a window, try `D3D12`, then `Vulkan`, bef
 | Step | Effort | Windows PC needed? | Status |
 |---|---|---|---|
 | W1. Initialize `ok` in 0004, add 0005, update `.gitattributes`; rebuild and re-check on the Mac | 0.25 day | No | Done |
-| W2. `build-windows-mainline.py` with the F1 FFmpeg | 0.5 day | No: CI runs it | Written; not run on Windows |
-| W3. The workflow, iterated until the zip builds (about 30 minutes per run) | 0.5–1 day | No | Written; not run yet |
+| W2. `build-windows-mainline.py` with the F1 FFmpeg | 0.5 day | No: CI runs it | Done: builds on CI |
+| W3. The workflow, iterated until the zip builds (about 30 minutes per run) | 0.5–1 day | No | Done: two runs, one fix (0006) |
 | W4. slp2alpha and the tools (section 5) | 0.5 day | Only to test | Done; Windows paths untested |
 | W5. First renders and the checks (section 7) | 0.5–1 day | Yes | [`plan-windows-remaining.md`](plan-windows-remaining.md) |
 | W6. Docs: a Windows section in `camera-export.md` and the README; plan statuses | 0.25 day | No | Pointers done; the Windows section waits for results |
