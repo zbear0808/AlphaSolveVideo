@@ -14,6 +14,7 @@ Guides for features integrated into `python3 -m slp2alpha render`:
 | **[Static Camera](static-camera.md)** | Lock the camera in place using Melee's fixed-camera mode with screen shake disabled. | `--static-camera` |
 | **[Custom Shy Guy Sprites](shy-guy-sprite.md)** | Replace Yoshi's Story Shy Guys with a custom logo or image via Dolphin custom textures. | `--shy-guy-sprite`, `--scale` |
 | **[Animelee Cel-Shaded Skins](../tools/animelee/README.md)** | Render replays with Animelee's cel-shaded character models and stages. | `--animelee`, `tools/animelee/build-iso.sh` |
+| **[Logo as the Stage](logo-stage.md)** | Fighters over a 3D logo sized to the stage, seen through Melee's own camera. | `tools/logo-stage/logo_stage.py`, `--animelee` |
 
 ---
 
@@ -37,6 +38,9 @@ Design specifications and cross-platform planning:
 |---|---|
 | **[macOS Implementation Plan](plan-macos-apple-silicon.md)** | Architecture, benchmarks, and current status of the native Apple Silicon unattended pipeline (`slp2alpha` + headless mainline Dolphin + Metal + FFV1). |
 | **[Windows Automation Plan](plan-windows.md)** | Scoping, architecture, and effort estimate for bringing headless one-command automation to Windows. |
+| **[Camera Export: Dolphin Patch](plan-camera-export-dolphin.md)** | Reading the game camera in Dolphin on every recorded frame and writing `camera - NAME.json` (`render --export-camera`). |
+| **[Camera Export: Blender Importer](plan-camera-export-blender.md)** | An animated Blender camera that matches the rendered video frame for frame. |
+| **[Camera Export: Validation](plan-camera-export-validation.md)** | Checks that the exported camera is what the game drew with, on the right frames, and that Blender reproduces it. |
 
 ---
 
