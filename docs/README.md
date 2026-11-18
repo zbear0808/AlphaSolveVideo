@@ -38,7 +38,8 @@ Design specifications and cross-platform planning:
 | Document | Scope |
 |---|---|
 | **[macOS Implementation Plan](plan-macos-apple-silicon.md)** | Architecture, benchmarks, and current status of the native Apple Silicon unattended pipeline (`slp2alpha` + headless mainline Dolphin + Metal + FFV1). |
-| **[Windows Automation Plan](plan-windows.md)** | Scoping, architecture, and effort estimate for bringing headless one-command automation to Windows. |
+| **[Windows Automation Plan](plan-windows.md)** | Scoping, architecture, and effort estimate for one-command automation on Windows with Slippi's official (Ishiiruka) playback build. |
+| **[Windows: Mainline Build and Camera Export](plan-windows-mainline.md)** | Building the patched headless mainline Dolphin for Windows (GitHub Actions or locally), and the slp2alpha changes, so `--export-camera` and window-free renders work there. |
 | **[Camera Export: Dolphin Patch](plan-camera-export-dolphin.md)** | Reading the game camera in Dolphin on every recorded frame and writing `camera - NAME.json` (`render --export-camera`). |
 | **[Camera Export: Blender Importer](plan-camera-export-blender.md)** | An animated Blender camera that matches the rendered video frame for frame. |
 | **[Camera Export: Validation](plan-camera-export-validation.md)** | Checks that the exported camera is what the game drew with, on the right frames, and that Blender reproduces it. |

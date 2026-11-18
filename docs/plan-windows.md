@@ -3,6 +3,8 @@
 Status: estimate, November 2026.
 Companion to [`plan-macos-apple-silicon.md`](plan-macos-apple-silicon.md). Pieces shared by both platforms are specified there: the orchestrator, the Dolphin configuration, recording validation and the faster solver math.
 
+This plan covers Slippi's official Windows build (Ishiiruka). [`plan-windows-mainline.md`](plan-windows-mainline.md) instead brings the macOS build to Windows: the patched mainline Dolphin. That build is needed for the camera export, and it never opens a window, so section 5's background options aren't needed with it. Option B5 becomes that plan.
+
 Evidence tags:
 
 - **[verified]**: measured, or read in source or on disk, during this investigation.
@@ -14,7 +16,7 @@ Evidence tags:
 
 ## 1. Summary
 
-- **No Dolphin build is needed on Windows.** Slippi's official Windows playback Dolphin (3.5.2) already contains the FFV1 video encoder [verified]. The README's manual workflow is the Windows workflow.
+- **No Dolphin build is needed for this route.** Slippi's official Windows playback Dolphin (3.5.2) already contains the FFV1 video encoder [verified]. The README's manual workflow is the Windows workflow. The camera export does need a build ([`plan-windows-mainline.md`](plan-windows-mainline.md)).
 - **The big Mac problem doesn't apply.** On a normal x86 PC, Dolphin's fast CPU recompiler runs natively. On the Mac it only failed under Docker's x86 translator [estimate: this is Slippi's shipping setup, but it wasn't measured here].
 - **What's left:** one-command automation, optional background rendering, the faster solver math, and the same stage limits as on macOS.
 - **Effort:**
