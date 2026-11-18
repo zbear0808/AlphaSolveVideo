@@ -124,7 +124,8 @@ def output_paths(out_dir: Path, name: str, fmt_name: str) -> SolveOutputs:
 @lru_cache(maxsize=None)
 def available_encoders(ffmpeg: str) -> FrozenSet[str]:
     try:
-        out = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], capture_output=True, text=True, timeout=30).stdout
+        out = subprocess.run([ffmpeg, "-hide_banner", "-encoders"], capture_output=True, encoding="utf-8",
+                             errors="replace", timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         return frozenset()
     return frozenset(parts[1] for parts in (line.split() for line in out.splitlines())
@@ -137,6 +138,17 @@ def encoder_choices(ffmpeg: str, fmt: str) -> List[OutputFormat]:
     if fmt in ACCELERATED and ACCELERATED[fmt][0] in available_encoders(ffmpeg):
         choices.append(ACCELERATED[fmt][1])
     return choices + [FORMATS[fmt]]
+
+
+def missing_encoder(ffmpeg: str, fmt: str) -> Optional[str]:
+    """The encoder that `--format fmt` needs and this ffmpeg lacks (e.g. hevc_videotoolbox off macOS), or None.
+    None also when the encoder list can't be read: ffmpeg will say what's wrong then."""
+    have = available_encoders(ffmpeg)
+    needed = [spec.video_args[spec.video_args.index("-c:v") + 1]
+              for spec in encoder_choices(ffmpeg, fmt) if "-c:v" in spec.video_args]
+    if not have or not needed or any(name in have for name in needed):
+        return None
+    return needed[-1]
 
 
 class GrowingFile:

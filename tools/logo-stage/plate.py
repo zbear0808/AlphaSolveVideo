@@ -48,8 +48,22 @@ SCENE = "SH010_Reveal"
 STYLES = ("metal", "cel")
 
 
+def _windows_blenders() -> list:
+    """Blender's Windows installs (C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe), newest first."""
+    if os.name != "nt":
+        return []
+    root = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Blender Foundation"
+    found = [p for p in root.glob("Blender*/blender.exe") if p.is_file()]
+
+    def version(p: Path):
+        digits = p.parent.name.replace("Blender", "").strip().split(".")
+        return [int(d) if d.isdigit() else 0 for d in digits]
+
+    return [str(p) for p in sorted(found, key=version, reverse=True)]
+
+
 def find_blender(explicit: Optional[str] = None) -> str:
-    for c in (explicit, os.environ.get("BLENDER"), str(BLENDER_APP), shutil.which("blender")):
+    for c in (explicit, os.environ.get("BLENDER"), str(BLENDER_APP), *_windows_blenders(), shutil.which("blender")):
         if c and Path(c).exists():
             return str(c)
     raise locate.NotFound("Blender not found: install it, or pass --blender PATH / set BLENDER")
@@ -99,12 +113,12 @@ def run_blender(job: dict, project: Path, blender: Optional[str] = None, log: Op
     exe = find_blender(blender)
     with tempfile.TemporaryDirectory(prefix="logo-plate-") as tmp:
         job_file = Path(tmp) / "job.json"
-        job_file.write_text(json.dumps(job))
+        job_file.write_text(json.dumps(job), encoding="utf-8")
         cmd = [exe, "-b", "--factory-startup", str(project), "-S", SCENE, "-noaudio", "--python",
                str(HERE / "blender_plate.py"), "--", str(job_file)]
-        done = subprocess.run(cmd, capture_output=True, text=True)
+        done = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace")
     if log:
-        log.write_text(done.stdout + "\n--- stderr ---\n" + done.stderr)
+        log.write_text(done.stdout + "\n--- stderr ---\n" + done.stderr, encoding="utf-8")
     report = None
     for line in done.stdout.splitlines():
         if line.startswith("PLATE_REPORT "):

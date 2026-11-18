@@ -27,7 +27,6 @@ tools/render-tests downloads to the cache folder. Only the standard library and 
 from __future__ import annotations
 
 import argparse
-import os
 import statistics
 import struct
 import sys
@@ -286,9 +285,7 @@ def check_hangs(results: Sequence[Result]) -> Tuple[List[str], List[str]]:
 
 
 def default_replays() -> List[Path]:
-    base = Path.home() / "Library" / "Caches" if sys.platform == "darwin" else Path(
-        os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return [base / "AlphaSolveVideo" / "test-replays"]
+    return [locate.cache_root() / "test-replays"]
 
 
 def find_replays(places: Sequence[str]) -> List[Path]:

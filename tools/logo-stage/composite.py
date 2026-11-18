@@ -26,7 +26,7 @@ DEFAULT_RATE = "60000/1001"
 def probe(ffprobe: str, video: Path) -> dict:
     out = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
                           "stream=width,height,r_frame_rate,nb_frames,pix_fmt", "-of", "default=nw=1", str(video)],
-                         capture_output=True, text=True, check=True).stdout
+                         capture_output=True, encoding="utf-8", errors="replace", check=True).stdout
     return dict(line.split("=", 1) for line in out.split() if "=" in line)
 
 
@@ -56,7 +56,8 @@ def composite(plate: Path, video: Path, out: Path, *, background: Optional[str] 
         attempts = [spec.video_args for spec in solve.encoder_choices(ffmpeg, "mov")]
     done = None
     for codec in attempts:
-        done = subprocess.run(head + ["-filter_complex", graph] + codec + [str(out)], capture_output=True, text=True)
+        done = subprocess.run(head + ["-filter_complex", graph] + codec + [str(out)], capture_output=True,
+                              encoding="utf-8", errors="replace")
         if done.returncode == 0:
             break
     else:

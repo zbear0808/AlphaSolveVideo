@@ -19,6 +19,7 @@ import json
 import math
 import os
 import sys
+from pathlib import Path
 
 import bpy
 from mathutils import Matrix, Vector
@@ -364,7 +365,7 @@ def configure_render(sc, job):
 
 
 def main():
-    job = json.load(open(sys.argv[sys.argv.index("--") + 1]))
+    job = json.loads(Path(sys.argv[sys.argv.index("--") + 1]).read_text(encoding="utf-8"))
     sc = bpy.context.scene
     log("scene", sc.name, "style", job["style"], "->", job["out"])
     sc.frame_set(int(job.get("frame", 1)))
@@ -409,7 +410,7 @@ def main():
         bpy.ops.render.render(write_still=True)
     print("PLATE_REPORT " + json.dumps(report))
     if job.get("report"):
-        json.dump(report, open(job["report"], "w"), indent=1)
+        Path(job["report"]).write_text(json.dumps(report, indent=1), encoding="utf-8")
 
 
 if __name__ == "__main__":

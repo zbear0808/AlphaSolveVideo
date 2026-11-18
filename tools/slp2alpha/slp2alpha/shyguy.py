@@ -95,7 +95,7 @@ def fit_box(image: Tuple[int, int], texture: Tuple[int, int]) -> Tuple[int, int,
 
 def _image_size(ffprobe: str, image: Path) -> Tuple[int, int]:
     p = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height",
-                        "-of", "json", str(image)], capture_output=True, text=True)
+                        "-of", "json", str(image)], capture_output=True, encoding="utf-8", errors="replace")
     try:
         stream = json.loads(p.stdout)["streams"][0]
         size = int(stream["width"]), int(stream["height"])

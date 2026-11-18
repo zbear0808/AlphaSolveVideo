@@ -19,6 +19,43 @@ class NotFound(RuntimeError):
     pass
 
 
+def cache_root() -> Path:
+    """This repo's cache folder (builds, downloads, test replays): $ALPHASOLVE_CACHE if set, else the platform's
+    cache location: ~/Library/Caches on macOS, %LOCALAPPDATA% on Windows, $XDG_CACHE_HOME or ~/.cache elsewhere."""
+    if os.environ.get("ALPHASOLVE_CACHE"):
+        return Path(os.environ["ALPHASOLVE_CACHE"]).expanduser()
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Caches"
+    elif os.name == "nt":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    else:
+        base = Path(os.environ.get("XDG_CACHE_HOME") or Path.home() / ".cache")
+    return base / "AlphaSolveVideo"
+
+
+def mainline_package() -> Path:
+    """Where the build scripts put the headless mainline build."""
+    name = ("Slippi Dolphin.app" if sys.platform == "darwin" else
+            "dolphin-emu-nogui.exe" if os.name == "nt" else "dolphin-emu-nogui")
+    return PACKAGES / "slippi-playback-mainline" / name
+
+
+def build_hint() -> str:
+    """How to get the headless mainline build on this platform."""
+    if sys.platform == "darwin":
+        return "build it with tools/dolphin-build/build-mac-mainline.sh"
+    if os.name == "nt":
+        return ("build it with tools\\dolphin-build\\build-windows-mainline.py, or unpack the zip from the "
+                "\"Windows playback Dolphin\" GitHub Actions workflow into packages\\slippi-playback-mainline")
+    return "there is no build script for this platform yet (docs/plan-windows-mainline.md has the Windows one)"
+
+
+def utf8_child_env() -> dict:
+    """The environment for running slp2alpha (or another Python script) whose output is read and decoded as
+    UTF-8. On Windows a child Python writes to a pipe in the locale's code page unless told otherwise."""
+    return dict(os.environ, PYTHONIOENCODING="utf-8")
+
+
 def launcher_data_dir() -> Path:
     if sys.platform == "darwin":
         return Path.home() / "Library" / "Application Support" / "Slippi Launcher"
@@ -38,16 +75,17 @@ def find_dolphin(explicit: Optional[str] = None) -> Path:
     candidates: List[Path] = []
     if sys.platform == "darwin":
         # Prefer the native headless build (tools/dolphin-build/build-mac-mainline.sh).
-        candidates.append(PACKAGES / "slippi-playback-mainline" / "Slippi Dolphin.app")
+        candidates.append(mainline_package())
         candidates.append(PACKAGES / "slippi-playback-framedump" / "Slippi Dolphin.app")
     elif os.name == "nt":
+        # The headless build first (tools/dolphin-build/build-windows-mainline.py), then Ishiiruka (a window).
+        candidates.append(mainline_package())
         candidates.append(PACKAGES / "slippi-playback-3.5.2" / "Slippi Dolphin.exe")
         candidates.append(launcher_data_dir() / "playback" / "Slippi Dolphin.exe")
     for c in candidates:
         if c.exists():
             return c
-    raise NotFound("No frame-dump-capable Slippi playback Dolphin found. On macOS, build it with "
-                   "tools/dolphin-build/build-mac-local.sh, or pass --dolphin PATH.")
+    raise NotFound(f"No frame-dump-capable Slippi playback Dolphin found: {build_hint()}, or pass --dolphin PATH.")
 
 
 def launcher_playback_app() -> Optional[Path]:
@@ -73,16 +111,14 @@ def find_iso(explicit: Optional[str] = None) -> Path:
 
 
 def animelee_iso_path() -> Path:
-    """Where tools/animelee/build-iso.sh writes the Animelee ISO."""
-    base = Path.home() / "Library" / "Caches" if sys.platform == "darwin" else Path(
-        os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return base / "AlphaSolveVideo" / "animelee" / "ANIMELEE - COMPLETE EDITION.iso"
+    """Where tools/animelee/build_iso.py writes the Animelee ISO."""
+    return cache_root() / "animelee" / "ANIMELEE - COMPLETE EDITION.iso"
 
 
 def find_animelee_iso() -> Path:
     p = animelee_iso_path()
     if not p.exists():
-        raise NotFound(f"No Animelee ISO at {p}. Build it with tools/animelee/build-iso.sh.")
+        raise NotFound(f"No Animelee ISO at {p}. Build it with tools/animelee/build_iso.py.")
     return p
 
 
@@ -111,10 +147,12 @@ def find_ffmpeg(explicit: Optional[str] = None, name: str = "ffmpeg") -> str:
     found = shutil.which(name)
     if found:
         return found
-    for c in ("/opt/homebrew/bin", "/usr/local/bin"):
-        if (Path(c) / name).exists():
-            return str(Path(c) / name)
-    raise NotFound(f"{name} not found; install it (macOS: brew install ffmpeg) or pass --ffmpeg PATH.")
+    if sys.platform == "darwin":
+        for c in ("/opt/homebrew/bin", "/usr/local/bin"):
+            if (Path(c) / name).exists():
+                return str(Path(c) / name)
+    raise NotFound(f"{name} not found; install it (macOS: brew install ffmpeg; Windows: winget install Gyan.FFmpeg, "
+                   "or unpack an FFmpeg build's bin folder into packages/ffmpeg) or pass --ffmpeg PATH.")
 
 
 def is_apple_silicon() -> bool:

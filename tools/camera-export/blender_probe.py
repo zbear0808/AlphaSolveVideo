@@ -19,7 +19,7 @@ import import_melee_camera as imc  # noqa: E402
 
 
 def main():
-    job = json.loads(Path(sys.argv[sys.argv.index("--") + 1]).read_text())
+    job = json.loads(Path(sys.argv[sys.argv.index("--") + 1]).read_text(encoding="utf-8"))
     o = job.get("options", {})
     opts = imc.Options(scale=o.get("scale", 1.0), offset=tuple(o.get("offset", (0.0, 0.0, 0.0))),
                        frame_start=o.get("frame_start", 1), shake=o.get("shake", True))
@@ -43,7 +43,7 @@ def main():
             c = world_to_camera_view(scene, cam, imc.melee_point(point, opts))
             pixels[i] = [c.x * r.resolution_x, (1.0 - c.y) * r.resolution_y, c.z]
     out["pixels"] = pixels
-    Path(job["out"]).write_text(json.dumps(out))
+    Path(job["out"]).write_text(json.dumps(out), encoding="utf-8")
     print("PROBE_DONE", len(pixels))
 
 

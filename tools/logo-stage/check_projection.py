@@ -208,7 +208,8 @@ def main() -> int:
         import json
         plain = [[float(c) for c in r] for r in rows]
         Path(args.json).write_text(json.dumps({"stage": info.stage_id, "replay": replay.name, "rows": plain,
-                                               "per_char_units": {str(c): [float(x) for x in v] for c, v in per_char.items()}}))
+                                               "per_char_units": {str(c): [float(x) for x in v] for c, v in per_char.items()}}),
+                                   encoding="utf-8")
 
     res_u = [((r[5] - r[3]) / s, r[1], r[0], r[3] / s, r[2]) for r in rows]
     for facing in (-1.0, 1.0):

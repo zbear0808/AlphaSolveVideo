@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import sys
 import uuid
 from collections import OrderedDict
 from pathlib import Path
@@ -97,14 +99,25 @@ def _ishiiruka_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: 
     return dolphin, gfx, log_names
 
 
+def default_video_backend() -> Optional[str]:
+    """The mainline build's video backend when none is asked for: one that renders without a window.
+    On Windows, Direct3D 11 ("D3D"); "D3D12" and "Vulkan" can run without a window too."""
+    if sys.platform == "darwin":
+        return "Metal"
+    if os.name == "nt":
+        return "D3D"
+    return None  # the build's own default
+
+
 def _mainline_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: Optional[bool],
                    video_backend: Optional[str], custom_textures: bool = False
                    ) -> Tuple[OrderedDict, OrderedDict, List[str]]:
-    core = OrderedDict([
-        ("GFXBackend", video_backend or "Metal"),
-        ("EmulationSpeed", "0"),  # unthrottled
-        ("EnableCheats", "True"),
-    ])
+    core = OrderedDict()
+    backend = video_backend or default_video_backend()
+    if backend:
+        core["GFXBackend"] = backend
+    core["EmulationSpeed"] = "0"  # unthrottled
+    core["EnableCheats"] = "True"
     if cpu_core is not None:
         core["CPUCore"] = str(cpu_core)
     if fastmem is not None:

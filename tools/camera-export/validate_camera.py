@@ -150,18 +150,19 @@ def render(replay: Path, out_dir: Path, extra: Sequence[str], keep: bool = True)
     cmd = [sys.executable, "-m", "slp2alpha", "render", str(replay), "--out-dir", str(out_dir), *extra]
     if keep:
         cmd.append("--keep")
-    p = subprocess.run(cmd, cwd=SLP2ALPHA, capture_output=True, text=True)
+    p = subprocess.run(cmd, cwd=SLP2ALPHA, capture_output=True, encoding="utf-8", errors="replace",
+                       env=locate.utf8_child_env())
     text = (p.stdout + p.stderr).replace("\r", "\n")
     if p.returncode != 0:
         raise RuntimeError(f"slp2alpha render failed ({p.returncode}):\n" + "\n".join(text.splitlines()[-15:]))
     found: Dict[str, Path] = {}
     for line in text.splitlines():
         line = line.strip()
-        name = Path(line).name
+        path = Path(line)
         for key, prefix in (("transparent", "fullTransparent - "), ("alpha_map", "alphaMap - "),
                             ("camera", "camera - ")):
-            if line.startswith("/") and name.startswith(prefix):
-                found[key] = Path(line)
+            if path.is_absolute() and path.name.startswith(prefix):
+                found[key] = path
         m = re.match(r"work folder kept: (.+)", line)
         if m:
             found["work"] = Path(m.group(1).strip())
@@ -456,7 +457,7 @@ def cmd_track(args) -> int:
         print(f"  feet below the stage top at the export's alignment: median {base['feet_median']:+.2f} units")
         if args.json:
             Path(args.json).write_text(json.dumps({"spread": {f"{dc},{df}": s for (dc, df), s in scores.items()},
-                                                   "slopes": slopes}, indent=1))
+                                                   "slopes": slopes}, indent=1), encoding="utf-8")
         for p in problems:
             print(f"  problem: {p}")
         for u in unsure:
@@ -514,13 +515,13 @@ def cmd_blender(args) -> int:
         with tempfile.TemporaryDirectory(prefix="camera-blender-") as tmp:
             job = {"camera": str(path), "options": opts, "out": str(Path(tmp) / "out.json"),
                    "probes": [[frame_start + k, p] for k, p in probes]}
-            (Path(tmp) / "job.json").write_text(json.dumps(job))
+            (Path(tmp) / "job.json").write_text(json.dumps(job), encoding="utf-8")
             done = subprocess.run([blender, "-b", "--factory-startup", "-noaudio", "--python",
                                    str(HERE / "blender_probe.py"), "--", str(Path(tmp) / "job.json")],
-                                  capture_output=True, text=True)
+                                  capture_output=True, encoding="utf-8", errors="replace")
             if done.returncode != 0 or not (Path(tmp) / "out.json").exists():
                 return fail("Blender failed:\n" + "\n".join((done.stdout + done.stderr).splitlines()[-20:]))
-            result = json.loads((Path(tmp) / "out.json").read_text())
+            result = json.loads((Path(tmp) / "out.json").read_text(encoding="utf-8"))
         worst = worst_center = 0.0
         for (k, p), got in zip(probes, result["pixels"]):
             want = cams[k].project(p, size=size) if _in_front(cams[k], p) else None
@@ -677,14 +678,14 @@ def cmd_compare(args) -> int:
 # ---------------------------------------------------------------- readonly
 def frame_hashes(video: Path) -> List[str]:
     out = subprocess.run([locate.find_ffmpeg(), "-nostdin", "-v", "error", "-i", str(video), "-f", "framemd5", "-"],
-                         capture_output=True, text=True, check=True).stdout
+                         capture_output=True, encoding="utf-8", errors="replace", check=True).stdout
     return [line.rsplit(",", 1)[-1].strip() for line in out.splitlines() if line and not line.startswith("#")]
 
 
 def rate_of(video: Path) -> str:
     return subprocess.run([locate.find_ffmpeg(name="ffprobe"), "-v", "error", "-select_streams", "v:0",
                            "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", str(video)],
-                          capture_output=True, text=True, check=True).stdout.strip()
+                          capture_output=True, encoding="utf-8", errors="replace", check=True).stdout.strip()
 
 
 def cmd_readonly(args) -> int:

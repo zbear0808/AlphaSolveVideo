@@ -31,7 +31,8 @@ class Probe:
 def probe(ffprobe: str, video: str) -> Probe:
     out = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets",
                           "-show_entries", "stream=codec_name,pix_fmt,width,height,nb_read_packets,r_frame_rate",
-                          "-of", "json", video], capture_output=True, text=True, check=True).stdout
+                          "-of", "json", video], capture_output=True, encoding="utf-8", errors="replace",
+                         check=True).stdout
     s = json.loads(out)["streams"][0]
     return Probe(s.get("codec_name", "?"), s.get("pix_fmt", "?"), int(s.get("width", 0)),
                  int(s.get("height", 0)), int(s.get("nb_read_packets", 0)), s.get("r_frame_rate", "60/1"))
@@ -44,7 +45,8 @@ def timestamp_gaps(ffprobe: str, video: str, rate: str) -> List[Tuple[int, int]]
     skipped field as a jump of two field durations.
     """
     out = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "packet=pts_time",
-                          "-of", "csv=p=0", video], capture_output=True, text=True, check=True).stdout
+                          "-of", "csv=p=0", video], capture_output=True, encoding="utf-8", errors="replace",
+                         check=True).stdout
     times = sorted(float(t) for t in out.split() if t not in ("N/A", ""))
     num, _, den = rate.partition("/")
     step = float(den or 1) / float(num)
@@ -70,7 +72,7 @@ def _metadata_values(ffmpeg: str, video: str, graph: str, frames: Optional[int] 
     if frames:
         cmd += ["-frames:v", str(frames)]
     cmd += ["-f", "null", "-"]
-    out = subprocess.run(cmd, capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(cmd, capture_output=True, encoding="utf-8", errors="replace", check=True).stdout
     return [float(v) for v in _YAVG.findall(out)]
 
 

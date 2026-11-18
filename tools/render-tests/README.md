@@ -1,6 +1,6 @@
 # Render tests
 
-`run.py` renders a set of public replays from [Slippi Lab](https://slippilab.com) and checks the results. The replays are listed in `replays.json` and downloaded on first use to `~/Library/Caches/AlphaSolveVideo/test-replays/` (about 30 MB).
+`run.py` renders a set of public replays from [Slippi Lab](https://slippilab.com) and checks the results. The replays are listed in `replays.json` and downloaded on first use to `test-replays/` in the cache folder (about 30 MB; see below).
 
 ```sh
 python3 tools/render-tests/run.py                 # everything (about an hour on an M1)
@@ -17,7 +17,7 @@ Each replay is rendered once per entry in its `"renders"` list, e.g. `[]` for a 
 - enough of a typical frame is transparent: over 80% with `--characters-only`, over 15% with the stage visible;
 - with `--export-camera`: the camera file passes `tools/camera-export/validate_camera.py check` (also against Dolphin's raw rows), has a sample for every video frame (except the game's last frame of a replay that ends on stocks or time), and both videos are labelled exactly 60 fps.
 
-Results go to `~/Library/Caches/AlphaSolveVideo/render-test-results/`:
+Results go to `render-test-results/` in the cache folder (`~/Library/Caches/AlphaSolveVideo` on macOS, `%LOCALAPPDATA%\AlphaSolveVideo` on Windows):
 
 - `summary.md`: one row per render;
 - per render, `result.json`, `render.log` and `sheet.png`. The sheet has eight frames composited over magenta, with their alpha below.
@@ -28,7 +28,8 @@ Status per render:
 
 - **PASS**: no problems;
 - **CHECK**: it finished, but something needs a look (listed in the summary);
-- **FAIL**: the render failed.
+- **FAIL**: the render failed;
+- **SKIP**: this ffmpeg has no encoder for the render's format (`--format hevc` needs macOS). Nothing is saved, so it runs once an ffmpeg that can is found.
 
 The replays were picked to cover:
 

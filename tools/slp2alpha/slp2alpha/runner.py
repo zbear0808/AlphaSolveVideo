@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import functools
 import os
 import plistlib
@@ -19,6 +20,7 @@ from . import config
 _MARKER = re.compile(r"^\[([A-Z_]+)\](?:\s+(-?\d+|.+))?\s*$")
 _HELP_OPTION = re.compile(r"(?<![\w-])(--[a-z][a-z0-9_-]*)")
 MAINLINE_EXECUTABLE = "dolphin-emu-nogui"
+WM_CLOSE = 0x0010
 
 
 @dataclass
@@ -78,7 +80,8 @@ def engine_of(app_or_exe: Path) -> str:
 @functools.lru_cache(maxsize=None)
 def _help_options(exe: str, mtime: float) -> FrozenSet[str]:
     try:
-        out = subprocess.run([exe, "--help"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+        out = subprocess.run([exe, "--help"], stdin=subprocess.DEVNULL, capture_output=True, encoding="utf-8",
+                             errors="replace", timeout=60)
     except (OSError, subprocess.SubprocessError):
         return frozenset()
     return frozenset(_HELP_OPTION.findall(out.stdout + out.stderr))
@@ -121,9 +124,10 @@ def run_dolphin(
     """Run one replay. Stops once [CURRENT_FRAME] reaches stop_at_frame (default: [GAME_END_FRAME]),
     or when the build reports [PLAYBACK_TERMINATED] (the mainline build does at the replay's end)."""
     exe = dolphin_executable(dolphin)
+    engine = engine_of(dolphin)
     for d in (dump_dir, log_dir):
         Path(d).mkdir(parents=True, exist_ok=True)
-    args = dolphin_args(engine_of(dolphin), exe, iso, comm_file, user_dir, dump_dir)
+    args = dolphin_args(engine, exe, iso, comm_file, user_dir, dump_dir)
     args += list(extra_args or [])
     env = dict(os.environ)
     env.update(extra_env or {})
@@ -136,7 +140,9 @@ def run_dolphin(
 
     result.started_at = time.monotonic()
     proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                            env=env, start_new_session=True)
+                            env=env, **_own_process_group())
+    with _live_lock:
+        _live[proc] = engine
     if on_start:
         on_start(proc)
 
@@ -211,20 +217,91 @@ def run_dolphin(
                 break
     finally:
         result.ended_at = time.monotonic()
-        result.returncode = _stop(proc)
+        result.returncode = _stop(proc, engine)
+        with _live_lock:
+            _live.pop(proc, None)
         for t in readers:
             t.join(timeout=5)
     return result
 
 
-def _stop(proc: subprocess.Popen, term_wait: float = 20.0) -> Optional[int]:
+# Dolphin processes started and not stopped yet. Renders run Dolphin on a worker thread, whose `finally`
+# doesn't run when Ctrl+C ends the program, and Dolphin is in its own process group, so it doesn't get the
+# Ctrl+C itself: stop whatever is left at exit, so no Dolphin keeps running.
+_live: Dict[subprocess.Popen, str] = {}
+_live_lock = threading.Lock()
+
+
+@atexit.register
+def _stop_live() -> None:
+    with _live_lock:
+        live = list(_live.items())
+    for proc, engine in live:
+        _stop(proc, engine)
+
+
+def _own_process_group() -> dict:
+    """Popen arguments that start Dolphin in a process group of its own: a stop request then reaches Dolphin
+    alone, and the terminal's Ctrl+C doesn't reach it at all (slp2alpha stops it instead)."""
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+def _close_windows(pid: int) -> bool:
+    """Windows: ask a program to quit as its close button would (WM_CLOSE to its visible top-level windows).
+    False if it has no window."""
+    import ctypes
+    from ctypes import wintypes
+
+    user32 = ctypes.windll.user32
+    user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+    user32.IsWindowVisible.argtypes = [wintypes.HWND]
+    user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    found = []
+
+    @ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+    def visit(hwnd, _):
+        owner = wintypes.DWORD()
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+        if owner.value == pid and user32.IsWindowVisible(hwnd):
+            found.append(hwnd)
+        return True
+
+    user32.EnumWindows(visit, 0)
+    for hwnd in found:
+        user32.PostMessageW(hwnd, WM_CLOSE, 0, 0)
+    return bool(found)
+
+
+def _ask_to_quit(proc: subprocess.Popen, engine: str) -> None:
+    """The stop that lets Dolphin finish its recording. On Windows, the headless build quits on Ctrl+Break
+    (patch 0005; Windows has no SIGTERM), and Ishiiruka, a window program, on WM_CLOSE."""
+    if os.name != "nt":
+        os.killpg(proc.pid, signal.SIGTERM)
+    elif engine == config.MAINLINE:
+        proc.send_signal(signal.CTRL_BREAK_EVENT)
+    elif not _close_windows(proc.pid):
+        raise OSError("Dolphin has no window to close")
+
+
+def _kill(proc: subprocess.Popen, engine: str) -> None:
+    if os.name == "nt":
+        proc.kill()
+    else:
+        os.killpg(proc.pid, signal.SIGKILL)
+
+
+def _stop(proc: subprocess.Popen, engine: str, term_wait: float = 20.0) -> Optional[int]:
     if proc.poll() is not None:
         return proc.returncode
-    for sig, wait in ((signal.SIGTERM, term_wait), (signal.SIGKILL, 5.0)):
+    for step, wait in ((_ask_to_quit, term_wait), (_kill, 5.0)):
         try:
-            os.killpg(proc.pid, sig)
+            step(proc, engine)
         except ProcessLookupError:
             break
+        except OSError:
+            continue  # e.g. no shared console for Ctrl+Break: go on to the hard stop
         try:
             return proc.wait(timeout=wait)
         except subprocess.TimeoutExpired:

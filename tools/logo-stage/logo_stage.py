@@ -20,7 +20,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 import shutil
 import subprocess
 import sys
@@ -38,9 +37,7 @@ import stagedata  # noqa: E402
 from slp2alpha import locate, slp  # noqa: E402
 
 SLP2ALPHA_DIR = HERE.parent / "slp2alpha"
-_BASE = (Path.home() / "Library" / "Caches" if sys.platform == "darwin"
-         else Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")))
-CACHE = _BASE / "AlphaSolveVideo" / "logo-stage" / "plates"
+CACHE = locate.cache_root() / "logo-stage" / "plates"
 
 
 def plate_key(job: dict, project: Path) -> str:
@@ -80,14 +77,15 @@ def run_slp2alpha(replay: Path, out_dir: Path, args: argparse.Namespace, passthr
         if value:
             cmd += [opt, value]
     cmd += passthrough
-    proc = subprocess.run(cmd, cwd=SLP2ALPHA_DIR, stdout=subprocess.PIPE, text=True)
+    proc = subprocess.run(cmd, cwd=SLP2ALPHA_DIR, stdout=subprocess.PIPE, encoding="utf-8", errors="replace",
+                          env=locate.utf8_child_env())
     sys.stdout.write(proc.stdout)
     if proc.returncode != 0:
         raise RuntimeError(f"slp2alpha render failed (exit {proc.returncode})")
     for line in proc.stdout.splitlines():
-        line = line.strip()
-        if line.startswith("/") and Path(line).name.startswith("fullTransparent - ") and Path(line).exists():
-            return Path(line)
+        path = Path(line.strip())
+        if path.is_absolute() and path.name.startswith("fullTransparent - ") and path.exists():
+            return path
     found = sorted(out_dir.glob("fullTransparent - *.mov"), key=lambda p: p.stat().st_mtime)
     if not found:
         raise RuntimeError("slp2alpha render wrote no transparent video")

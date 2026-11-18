@@ -2,7 +2,7 @@
 
 Exploratory and verification scripts used to validate [Animelee](https://www.animelee.xyz) compatibility with the AlphaSolve pipeline.
 
-The ISO build script needed for end-user renders lives at [`tools/animelee/build-iso.sh`](../../tools/animelee/build-iso.sh).
+The ISO build script needed for end-user renders lives at [`tools/animelee/build_iso.py`](../../tools/animelee/build_iso.py).
 
 ## Tools
 

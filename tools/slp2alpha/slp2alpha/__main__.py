@@ -1,4 +1,4 @@
-"""Command line: python3 -m slp2alpha {info,render,bench} ..."""
+"""Command line: python -m slp2alpha {info,render,bench} ... (python3 on macOS, py on Windows)"""
 
 from __future__ import annotations
 
@@ -33,10 +33,12 @@ def cmd_info(args) -> int:
 
 
 def _sample_cpu(pid: int, delay: float, out: dict) -> None:
-    """Best-effort snapshot of per-thread CPU use and scheduling priority (App Nap shows as low priority)."""
+    """Best-effort snapshot of per-thread CPU use and scheduling priority (App Nap shows as low priority).
+    macOS only: it reads `ps -M`."""
     time.sleep(delay)
     try:
-        rows = subprocess.run(["ps", "-M", "-p", str(pid)], capture_output=True, text=True, timeout=10).stdout
+        rows = subprocess.run(["ps", "-M", "-p", str(pid)], capture_output=True, encoding="utf-8", errors="replace",
+                              timeout=10).stdout
         threads = []
         for line in rows.splitlines()[1:]:
             parts = line.split()
@@ -52,7 +54,7 @@ def _sample_cpu(pid: int, delay: float, out: dict) -> None:
         threads.sort(reverse=True)
         out["busiest_threads"] = [f"{c:.0f}% (pri {p})" for c, p in threads[:4]]
         out["process_cpu"] = subprocess.run(["ps", "-o", "%cpu=", "-p", str(pid)], capture_output=True,
-                                            text=True, timeout=10).stdout.strip()
+                                            encoding="utf-8", errors="replace", timeout=10).stdout.strip()
     except Exception as e:  # sampling is best effort
         out["error"] = str(e)
 
@@ -79,10 +81,11 @@ def cmd_bench(args) -> int:
     config.write_comm(comm, args.replay, end_frame=stop_at + 1)
 
     cpu: dict = {}
-    load_before = os.getloadavg()
+    load_before = os.getloadavg() if hasattr(os, "getloadavg") else None  # not on Windows
 
     def on_start(proc):
-        threading.Thread(target=_sample_cpu, args=(proc.pid, args.cpu_sample_after, cpu), daemon=True).start()
+        if sys.platform == "darwin":
+            threading.Thread(target=_sample_cpu, args=(proc.pid, args.cpu_sample_after, cpu), daemon=True).start()
 
     print(f"Benchmark: {Path(args.dolphin).name} ({engine}) | replay {Path(args.replay).name} "
           f"({stages.stage_name(replay.stage_id)}, playing to frame {stop_at}) | "
@@ -100,7 +103,7 @@ def cmd_bench(args) -> int:
         "frames": f"{res.first_frame}..{res.last_frame}",
         "game_fps": round(res.game_fps, 1) if res.game_fps else None,
         "emulation_speed_S": round(res.game_fps * fields_per_frame / 60, 2) if res.game_fps else None,
-        "load_avg_before": [round(x, 1) for x in load_before],
+        "load_avg_before": [round(x, 1) for x in load_before] if load_before else None,
         "cpu_sample": cpu,
     }
     dumps = sorted(p for ext in ("*.avi", "*.mkv") for p in dump.rglob(ext))
@@ -108,7 +111,7 @@ def cmd_bench(args) -> int:
         ffprobe = locate.find_ffmpeg(name="ffprobe")
         probe = subprocess.run([ffprobe, "-v", "error", "-count_packets", "-select_streams", "v:0",
                                 "-show_entries", "stream=codec_name,pix_fmt,width,height,nb_read_packets",
-                                "-of", "json", str(dumps[0])], capture_output=True, text=True)
+                                "-of", "json", str(dumps[0])], capture_output=True, encoding="utf-8", errors="replace")
         try:
             report["dump"] = json.loads(probe.stdout)["streams"][0]
         except (ValueError, KeyError, IndexError):
@@ -218,7 +221,7 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     dump = config.dump_dir_for(engine, user, work / "dump")
     enabled = _render_codes(args, replay.stage_id, sprite is not None)
     config.write_user_dir(user, codes, enabled=enabled, scale=args.scale, engine=engine,
-                          cpu_thread=args.dual_core, debug_logging=args.debug,
+                          cpu_thread=args.dual_core, debug_logging=args.debug, video_backend=args.backend,
                           custom_textures=sprite.textures if sprite else None)
     comm = work / "comm.json"
     # Dolphin records strictly between startFrame and endFrame, so these give frames first..last.
@@ -354,21 +357,25 @@ def cmd_render(args) -> int:
     if args.export_camera:
         problem = ("it needs the headless mainline build" if engine != config.MAINLINE else
                    "GIFs are resampled to 50 fps, so their frames aren't game frames" if args.format == "gif" else
-                   f"{dolphin} has no {camera.DOLPHIN_OPTION} option: rebuild it with "
-                   "tools/dolphin-build/build-mac-mainline.sh" if camera.DOLPHIN_OPTION not in
-                   runner.dolphin_options(dolphin) else None)
+                   f"{dolphin} has no {camera.DOLPHIN_OPTION} option: {locate.build_hint()} to get one that has"
+                   if camera.DOLPHIN_OPTION not in runner.dolphin_options(dolphin) else None)
         if problem:
             print(f"error: --export-camera can't be used like this: {problem}", file=sys.stderr)
             return 2
     if engine != config.MAINLINE and not args.allow_window:
         print(f"error: {dolphin} is not the headless build: it would open a window that flashes black and "
-              "white (EPILEPSY WARNING). Build the headless one with tools/dolphin-build/build-mac-mainline.sh, "
+              f"white (EPILEPSY WARNING). To get the headless one, {locate.build_hint()}; "
               "or pass --allow-window to use this build anyway.", file=sys.stderr)
         return 2
     iso = locate.find_animelee_iso() if args.animelee else locate.find_iso(args.iso)
     locate.check_iso(iso)
     ffmpeg = locate.find_ffmpeg(args.ffmpeg)
     ffprobe = locate.find_ffmpeg(args.ffmpeg, name="ffprobe")
+    missing = solve.missing_encoder(ffmpeg, args.format)
+    if missing:
+        print(f"error: --format {args.format} needs ffmpeg's {missing} encoder, which {ffmpeg} doesn't have"
+              + (" (it's part of macOS)" if missing.endswith("_videotoolbox") else ""), file=sys.stderr)
+        return 2
     codes = gecko.load_codes(*(locate.RESOURCES / f for f in config.CODE_FILES))
     sprite = None
     if args.shy_guy_sprite:
@@ -380,6 +387,10 @@ def cmd_render(args) -> int:
 
 
 def main(argv=None) -> int:
+    # Windows writes piped output in the locale's code page: a file name it can't encode must not crash a render.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     p = argparse.ArgumentParser(prog="slp2alpha", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
@@ -419,12 +430,15 @@ def main(argv=None) -> int:
                     help="also write 'camera - NAME.json': Melee's camera on every frame of the video (eye, look-at "
                          "point, field of view, shake), for Blender (tools/camera-export). The videos are then "
                          "labelled exactly 60 fps (docs/camera-export.md)")
-    pr.add_argument("--dolphin", help="Slippi playback Dolphin .app or executable (default: packages/)")
+    pr.add_argument("--dolphin", help="Slippi playback Dolphin: a macOS .app or the executable "
+                                      "(default: the build in packages/)")
     pr.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
     pr.add_argument("--animelee", action="store_true",
                     help="render with the Animelee cel-shaded skins: uses the ISO built by "
-                         "tools/animelee/build-iso.sh (consider --scale 2 for cleaner outlines)")
+                         "tools/animelee/build_iso.py (consider --scale 2 for cleaner outlines)")
     pr.add_argument("--ffmpeg", help="ffmpeg executable (ffprobe is expected next to it)")
+    pr.add_argument("--backend", help="Dolphin's video backend (default: Metal on macOS, D3D on Windows; "
+                                      "also D3D12, Vulkan, OGL where the build has them)")
     pr.add_argument("--dual-core", action=argparse.BooleanOptionalAction, default=None,
                     help="override the playback codes' single-core setting (CPUThread)")
     pr.add_argument("--boot-timeout", type=float, default=120.0)
@@ -437,7 +451,7 @@ def main(argv=None) -> int:
     pr.set_defaults(func=cmd_render)
 
     pb = sub.add_parser("bench", help="measure Dolphin's emulation speed on this machine")
-    pb.add_argument("--dolphin", required=True, help="Slippi Dolphin .app (or executable)")
+    pb.add_argument("--dolphin", required=True, help="Slippi playback Dolphin: a macOS .app or the executable")
     pb.add_argument("--replay", required=True)
     pb.add_argument("--iso")
     pb.add_argument("--record", action=argparse.BooleanOptionalAction, default=True)
@@ -451,7 +465,8 @@ def main(argv=None) -> int:
     pb.add_argument("--fastmem", action=argparse.BooleanOptionalAction, default=None)
     pb.add_argument("--dual-core", action=argparse.BooleanOptionalAction, default=None,
                     help="override the playback codes' single-core setting (CPUThread)")
-    pb.add_argument("--backend", help="video backend, e.g. Metal, OGL or Vulkan (default: build default)")
+    pb.add_argument("--backend", help="video backend, e.g. Metal, D3D, D3D12, Vulkan or OGL (default: Metal on "
+                                      "macOS, D3D on Windows for the mainline build; else the build's default)")
     pb.add_argument("--extra-arg", action="append", default=[], help="extra Dolphin argument")
     pb.add_argument("--code", action="append", default=[], help="extra Gecko code to enable (by name)")
     pb.add_argument("--debug", action="store_true", help="write Dolphin's log file")

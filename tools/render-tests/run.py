@@ -13,6 +13,7 @@ Every replay is rendered with each argument list in its "renders" entry
 - how much of each frame is transparent (sampled once a second).
 A contact sheet (8 frames over magenta, and their alpha) is written for a visual check.
 Results go to OUT/summary.md; finished renders are skipped on the next run unless --force.
+Renders in a format this ffmpeg has no encoder for (e.g. --format hevc off macOS) are skipped.
 The large files (videos, recordings) are deleted after checking unless --keep-videos.
 """
 
@@ -20,7 +21,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import statistics
@@ -36,20 +36,14 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 SLP2ALPHA = REPO / "tools" / "slp2alpha"
 sys.path.insert(0, str(SLP2ALPHA))
-from slp2alpha import camera, locate, slp, validate  # noqa: E402
+from slp2alpha import camera, locate, slp, solve, validate  # noqa: E402
 
 BLOCK_PAIRS = 300  # pair check granularity: 5 s of gameplay
 NO_SIGNAL = 0.02   # mean pair violation below which a block tells nothing (nothing moved)
 
 
 def cache_dir() -> Path:
-    if sys.platform == "darwin":
-        base = Path.home() / "Library" / "Caches"
-    elif os.name == "nt":
-        base = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
-    else:
-        base = Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache"))
-    return base / "AlphaSolveVideo" / "test-replays"
+    return locate.cache_root() / "test-replays"
 
 
 def fetch(source: str, name: str) -> Path:
@@ -84,12 +78,17 @@ def flag_value(args: List[str], flag: str) -> Optional[int]:
 
 
 def ffmpeg_values(ffmpeg: str, inputs: List[str], graph: str, files: Dict[str, Path]) -> Dict[str, List[float]]:
-    """Run a filter graph whose chains print YAVG to the given metadata files; return the values per file."""
+    """Run a filter graph whose chains print YAVG to the given metadata files; return the values per file.
+
+    The graph names the files without a folder, and ffmpeg runs in the files' folder: a path inside a filter
+    graph would need its colons escaped, and a Windows path (C:\\...) always has one. Inputs must be absolute.
+    """
+    folder = next(iter(files.values())).parent
     subprocess.run([ffmpeg, "-nostdin", "-v", "error", *inputs, "-filter_complex", graph, "-map", "[o]",
-                    "-fps_mode", "passthrough", "-f", "null", "-"], check=True)
+                    "-fps_mode", "passthrough", "-f", "null", "-"], check=True, cwd=folder)
     out = {}
     for key, path in files.items():
-        text = path.read_text() if path.exists() else ""
+        text = path.read_text(encoding="utf-8") if path.exists() else ""
         out[key] = [float(v) for v in re.findall(r"YAVG=([0-9.]+)", text)]
     return out
 
@@ -97,7 +96,7 @@ def ffmpeg_values(ffmpeg: str, inputs: List[str], graph: str, files: Dict[str, P
 def probe(ffprobe: str, video: Path) -> dict:
     out = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
                           "stream=codec_name,pix_fmt,width,height,nb_read_packets,r_frame_rate", "-of", "json",
-                          str(video)], capture_output=True, text=True, check=True).stdout
+                          str(video)], capture_output=True, encoding="utf-8", errors="replace", check=True).stdout
     return json.loads(out)["streams"][0]
 
 
@@ -128,10 +127,10 @@ def alpha_stats(ffmpeg: str, video: Path, tmp: Path, every: int = 60) -> dict:
     t, o = tmp / "transparent.txt", tmp / "opaque.txt"
     graph = (f"[0:v]select=not(mod(n\\,{every})),format=rgba,alphaextract,split[a][b];"
              f"[a]lut=y='if(eq(val\\,0)\\,255\\,0)',signalstats,"
-             f"metadata=print:key=lavfi.signalstats.YAVG:file={t},nullsink;"
+             f"metadata=print:key=lavfi.signalstats.YAVG:file={t.name},nullsink;"
              f"[b]lut=y='if(gte(val\\,250)\\,255\\,0)',signalstats,"
-             f"metadata=print:key=lavfi.signalstats.YAVG:file={o}[o]")
-    v = ffmpeg_values(ffmpeg, decoder_args(video) + ["-i", str(video)], graph, {"t": t, "o": o})
+             f"metadata=print:key=lavfi.signalstats.YAVG:file={o.name}[o]")
+    v = ffmpeg_values(ffmpeg, decoder_args(video) + ["-i", str(Path(video).resolve())], graph, {"t": t, "o": o})
     tr = [x / 255 for x in v["t"]]
     op = [x / 255 for x in v["o"]]
     if not tr:
@@ -165,11 +164,11 @@ def pair_check(ffmpeg: str, recording: Path, pairs: int, tmp: Path) -> dict:
         chains.append(f"[a{off}]select={s[off]['black']},setpts=N/TB/60[k{off}];"
                       f"[b{off}]select={s[off]['white']},setpts=N/TB/60[w{off}];"
                       f"[k{off}][w{off}]blend=all_mode=subtract:shortest=1,format=gray,{lut},signalstats,"
-                      f"metadata=print:key=lavfi.signalstats.YAVG:file={files[f'v{off}']},nullsink;")
+                      f"metadata=print:key=lavfi.signalstats.YAVG:file={files[f'v{off}'].name},nullsink;")
     graph = ("[0:v]format=gbrp,split=5[a0][b0][a1][b1][l];" + "".join(chains) +
              f"[l]scale=iw/4:ih/4,format=gray,signalstats,metadata=print:key=lavfi.signalstats.YAVG:"
-             f"file={files['luma']}[o]")
-    v = ffmpeg_values(ffmpeg, ["-i", str(recording)], graph, files)
+             f"file={files['luma'].name}[o]")
+    v = ffmpeg_values(ffmpeg, ["-i", str(Path(recording).resolve())], graph, files)
     chosen, other = v[f"v{pairing.offset}"][:pairs], v[f"v{1 - pairing.offset}"][:pairs]
     bad = []
     for start in range(0, min(len(chosen), len(other)), BLOCK_PAIRS):
@@ -190,31 +189,38 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
     if opts.recheck:  # re-evaluate saved results with the current checks; render nothing
         if not result_file.exists():
             return None
-        res = json.loads(result_file.read_text())
+        res = json.loads(result_file.read_text(encoding="utf-8"))
         res["problems"] = problems(res)
         res["status"] = status(res)
-        result_file.write_text(json.dumps(res, indent=2))
+        result_file.write_text(json.dumps(res, indent=2), encoding="utf-8")
         return res
     if result_file.exists() and not opts.force:
-        return json.loads(result_file.read_text())
-    if out_dir.exists():
-        shutil.rmtree(out_dir)
-    out_dir.mkdir(parents=True)
+        return json.loads(result_file.read_text(encoding="utf-8"))
     info = slp.read_replay(replay)
     first, last = slp.clip_range(info, flag_value(args, "--start-frame"), flag_value(args, "--end-frame"))
     expected = last - first + 1
     res = {"replay": replay.name, "label": entry["label"], "args": args, "expected_frames": expected,
            "game_seconds": round(expected / 60, 1), "mid_match": first > slp.FIRST_FRAME + 1}
     print(f"\n== {replay.name} [{' '.join(args) or 'default'}]: {entry['label']}", flush=True)
+    fmt = args[args.index("--format") + 1] if "--format" in args else solve.DEFAULT_FORMAT
+    missing = solve.missing_encoder(locate.find_ffmpeg(), fmt)
+    if missing:  # e.g. --format hevc off macOS; not saved, so it runs once this ffmpeg can
+        res.update(status="SKIP", returncode=None, problems=[f"skipped: this ffmpeg has no {missing} encoder"])
+        print(f"   SKIP: this ffmpeg has no {missing} encoder")
+        return res
+    if out_dir.exists():
+        shutil.rmtree(out_dir)
+    out_dir.mkdir(parents=True)
 
     t0 = time.monotonic()
     cli_args = [a.replace("{tests}", str(HERE)) for a in args]  # {tests}: this folder, for files kept next to run.py
     p = subprocess.run([sys.executable, "-m", "slp2alpha", "render", str(replay), "--out-dir", str(out_dir),
-                        "--keep", *cli_args], cwd=SLP2ALPHA, capture_output=True, text=True)
+                        "--keep", *cli_args], cwd=SLP2ALPHA, capture_output=True, encoding="utf-8",
+                       errors="replace", env=locate.utf8_child_env())
     res["seconds"] = round(time.monotonic() - t0, 1)
     text = (p.stdout + "\n" + p.stderr).replace("\r", "\n")
     lines = [ln.rstrip() for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("Dolphin: frame")]
-    (out_dir / "render.log").write_text("\n".join(lines) + "\n")
+    (out_dir / "render.log").write_text("\n".join(lines) + "\n", encoding="utf-8")
     res["returncode"] = p.returncode
     res["messages"] = [ln.strip() for ln in lines if re.search(r"\b(warning|error|note):", ln)]
     m = re.search(r"([0-9.]+)x real time", text)
@@ -261,7 +267,7 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
 
     res["problems"] = problems(res)
     res["status"] = status(res)
-    result_file.write_text(json.dumps(res, indent=2))
+    result_file.write_text(json.dumps(res, indent=2), encoding="utf-8")
     print(f"   {res['status']}: {res.get('realtime')}x real time; " + ("; ".join(res["problems"]) or "no problems"))
     return res
 
@@ -327,7 +333,7 @@ def summary(results: List[dict], out_root: Path) -> Path:
                     f"{r.get('realtime') or '-'}x | {frames} | {alpha} | {pairing} | "
                     f"{'; '.join(r['problems']) or '-'} |")
     path = out_root / "summary.md"
-    path.write_text("# Render tests\n\n" + "\n".join(rows) + "\n")
+    path.write_text("# Render tests\n\n" + "\n".join(rows) + "\n", encoding="utf-8")
     return path
 
 
@@ -340,9 +346,16 @@ def main() -> int:
     ap.add_argument("--force", action="store_true", help="redo renders that already have results")
     ap.add_argument("--recheck", action="store_true",
                     help="only re-evaluate saved results with the current checks (renders nothing)")
+    ap.add_argument("--fetch-only", action="store_true",
+                    help=f"only download the replays (into {cache_dir()}) and list them")
     opts = ap.parse_args()
 
-    manifest = json.loads((HERE / "replays.json").read_text())
+    manifest = json.loads((HERE / "replays.json").read_text(encoding="utf-8"))
+    if opts.fetch_only:
+        for entry in manifest["replays"]:
+            if not opts.only or any(t.lower() in (entry["file"] + entry["label"]).lower() for t in opts.only):
+                print(fetch(manifest["source"], entry["file"]))
+        return 0
     out_root = Path(opts.out).expanduser()
     out_root.mkdir(parents=True, exist_ok=True)
     results = []
@@ -355,8 +368,9 @@ def main() -> int:
             if res is not None:
                 results.append(res)
     path = summary(results, out_root)
-    counts = {s: sum(r["status"] == s for r in results) for s in ("PASS", "CHECK", "FAIL")}
-    print(f"\n{counts['PASS']} passed, {counts['CHECK']} to check, {counts['FAIL']} failed. Summary: {path}")
+    counts = {s: sum(r["status"] == s for r in results) for s in ("PASS", "CHECK", "FAIL", "SKIP")}
+    skipped = f", {counts['SKIP']} skipped" if counts["SKIP"] else ""
+    print(f"\n{counts['PASS']} passed, {counts['CHECK']} to check, {counts['FAIL']} failed{skipped}. Summary: {path}")
     return 0 if not counts["FAIL"] and not counts["CHECK"] else 1
 
 
