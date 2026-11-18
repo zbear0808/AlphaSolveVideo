@@ -4,9 +4,9 @@
 Slippi records every item on every frame (type, state, facing, velocity, position, damage, spawn id), and
 Shy Guys are items (type 0xD2 = 210), so their paths are in the .slp file itself.
 
-    python3 tools/shyguy-probe/items.py summary [--replay FILE]
-    python3 tools/shyguy-probe/items.py tracks  [--replay FILE]
-    python3 tools/shyguy-probe/items.py window --from 60 --to 700 --step 40 [--replay FILE]
+    python3 research/shyguy-probe/items.py summary [--replay FILE]
+    python3 research/shyguy-probe/items.py tracks  [--replay FILE]
+    python3 research/shyguy-probe/items.py window --from 60 --to 700 --step 40 [--replay FILE]
 """
 
 from __future__ import annotations

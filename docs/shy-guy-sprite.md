@@ -23,9 +23,9 @@ Everything else about a Shy Guy is the game's own: its path, the turn at the wal
 
 A Shy Guy is a flat square textured with three images (RGB5A3, 76x72, 76x72 and 76x73) from `GrSt.dat`, the Yoshi's Story stage file. Dolphin replaces a texture when a PNG named after it, `tex1_<width>x<height>_<hash of the pixels>_<format>.png`, is in `Load/Textures/GALE01` under its user folder. `slp2alpha/shyguy.py` fits your image to the square, writes it under the three names and turns on `HiresTextures`, and `render` no longer uses the "Hide Shy Guys" code.
 
-- **Which names?** The names depend on the disc. `shyguy.py` hashes the textures in the ISO's `GrSt.dat` (`slp2alpha/disc.py`) and picks the set it knows: vanilla NTSC 1.02, or Animelee Complete Edition, whose Shy Guys are 152x144. Another disc stops with an error. `tools/shyguy-probe/textures.py diff` finds the names for a new one by comparing two Dolphin texture dumps, with and without Shy Guys.
+- **Which names?** The names depend on the disc. `shyguy.py` hashes the textures in the ISO's `GrSt.dat` (`slp2alpha/disc.py`) and picks the set it knows: vanilla NTSC 1.02, or Animelee Complete Edition, whose Shy Guys are 152x144. Another disc stops with an error. `research/shyguy-probe/textures.py diff` finds the names for a new one by comparing two Dolphin texture dumps, with and without Shy Guys.
 - **Edges.** Scaling is done with the colours multiplied by the alpha, and the transparent texels next to the sprite are given the colours of its edge. Otherwise Dolphin's filtering would pull the black of the transparent texels into the edge, and every sprite would get a dark outline.
-- **Measured** (`tools/shyguy-probe`, vanilla disc, Yoshi's Story): only these three textures differ with and without Shy Guys, over a whole replay. The recording pairs black and white fields as usual. Of 626 samples where the replay says a Shy Guy faces left, 626 were mirrored, and 0 of 944 where it faces right.
+- **Measured** (`research/shyguy-probe`, vanilla disc, Yoshi's Story): only these three textures differ with and without Shy Guys, over a whole replay. The recording pairs black and white fields as usual. Of 626 samples where the replay says a Shy Guy faces left, 626 were mirrored, and 0 of 944 where it faces right.
 
 ## Checked
 

@@ -1,10 +1,12 @@
 # Shy Guy probes
 
-Rerunnable experiments behind one question: can Yoshi's Story's Shy Guys be drawn with your own sprite in a transparent render, and where on screen does a position from the replay land? They use the repo's own pipeline (`slp2alpha`'s headless Dolphin runner, flicker codes and solver) and write everything to a work folder outside the repo. Nothing here is wired into `slp2alpha render` yet.
+Rerunnable experiments behind one question: can Yoshi's Story's Shy Guys be drawn with your own sprite in a transparent render, and where on screen does a position from the replay land? They use the repo's own pipeline (`slp2alpha`'s headless Dolphin runner, flicker codes and solver) and write everything to a work folder outside the repo.
+
+> **Status:** Custom sprite replacement was integrated into `slp2alpha render --shy-guy-sprite` (see [`docs/shy-guy-sprite.md`](../../docs/shy-guy-sprite.md)). These scripts are preserved for research, static-camera coordinate calibration (`calibrate.py`), and discovering texture hashes for new disc variants (`textures.py diff`).
 
 Needs the headless mainline build in `packages/` (`tools/dolphin-build/build-mac-mainline.sh`), a Melee NTSC 1.02 ISO and ffmpeg, as for `render`. The commands that look at pictures also need numpy and Pillow (`pip install numpy pillow`). The default replay is the Yoshi's Story one from `tools/render-tests/replays.json` (`RichAuthenticGull.slp`, 156 s, 18 Shy Guys); it is downloaded to the same cache. `--replay FILE` uses another one, `--out DIR` picks the work folder (default: a new temporary one).
 
-| Command | Time | What it shows |
+| Command (under `research/shyguy-probe/`) | Time | What it shows |
 |---|---|---|
 | `items.py summary / tracks / window` | 1 s, no Dolphin | what the `.slp` records about Shy Guys (item type 210): position, facing, state and damage on every frame |
 | `textures.py diff` | 7 s (`--full`: 2.5 min) | the textures Shy Guys draw, by diffing Dolphin texture dumps with and without the "Hide Shy Guys" code |

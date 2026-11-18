@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Which textures does a Shy Guy use, and what are Dolphin's names for them?
 
-    python3 tools/shyguy-probe/textures.py diff [--full] [--from 400 --to 490]
-    python3 tools/shyguy-probe/textures.py iso [--compare DIR]
+    python3 research/shyguy-probe/textures.py diff [--full] [--from 400 --to 490]
+    python3 research/shyguy-probe/textures.py iso [--compare DIR]
 
 diff  plays the same replay window twice in the headless build with DumpTextures on: once with Shy Guys
       drawn, once with the "Hide Shy Guys" code. The textures that only exist in the first dump are the

@@ -8,7 +8,26 @@ To apply the technique to images instead of video recordings, see [PdnAlphaSolve
 
 **EPILEPSY WARNING: Included example videos within the Resources folder as well as videos required for this technique contain constant black and white strobing at 30Hz and may present risks to individuals with epilepsy.**
 
-## Usage
+## Automated Replay Rendering (`slp2alpha` on macOS)
+
+An unattended CLI pipeline that renders Slippi replays (`.slp`) directly to transparent video (ProRes 4444 `.mov` with alpha) using a native headless Dolphin build on Apple Silicon.
+
+```sh
+cd tools/slp2alpha
+python3 -m slp2alpha render replay.slp --characters-only
+```
+
+- **Features:**
+  - `--characters-only`: hides the stage and particles; works across all legal stages.
+  - `--static-camera`: locks the camera in fixed mode for still framing.
+  - `--start-frame N --end-frame M`: renders combo clips directly from Slippi frame numbers.
+  - `--shy-guy-sprite IMAGE`: draws Yoshi's Story Shy Guys with your own image or logo.
+  - `--animelee`: renders with Animelee cel-shaded skins.
+- **Documentation & Research:** See the [**Documentation Index**](docs/README.md) for feature guides, reverse engineering research, and architecture plans.
+- **Testing:** See [`tools/render-tests/`](tools/render-tests/README.md) for the regression test harness.
+- **Reverse Engineering & Probes:** See [`research/`](research/README.md) for calibration and probe tools.
+
+## Classic Manual Workflow (Windows Batch Scripts)
 Download the latest release zip from the [releases page](https://github.com/NeilHarbin0/AlphaSolveVideo/releases). Extract the zip to preferably a dedicated folder. 
 
 1. You will need Dolphin emulator that supports lossless .avi output via framedump. Tested and working with Dolphin 5.0-17995. Find output path under `Options` -> `Configuration` -> `Paths` -> `Dump Path`.

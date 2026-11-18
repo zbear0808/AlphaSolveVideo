@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Where does a position from the replay land on screen? Fit it from renders made with the fixed camera.
 
-    python3 tools/shyguy-probe/calibrate.py fit      [--from -123 --to 1400]
-    python3 tools/shyguy-probe/calibrate.py fighters [--from -123 --to 2400]
+    python3 research/shyguy-probe/calibrate.py fit      [--from -123 --to 1400]
+    python3 research/shyguy-probe/calibrate.py fighters [--from -123 --to 2400]
 
 fit       draws every Shy Guy as a flat magenta square (a custom texture), finds the squares in the frames,
           matches them with the Shy Guys the replay lists, and fits pixel = scale * position + offset on each

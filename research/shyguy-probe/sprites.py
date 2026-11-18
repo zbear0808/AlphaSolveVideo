@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Replace the Shy Guy sprite with your own art, through the repo's real render pipeline.
 
-    python3 tools/shyguy-probe/sprites.py make DIR [--kind badge|solid|halves] [--scale 2]
-    python3 tools/shyguy-probe/sprites.py demo    [--from 1180 --to 1780] [--scale 1]
-    python3 tools/shyguy-probe/sprites.py markers [--from 560 --to 1800]
+    python3 research/shyguy-probe/sprites.py make DIR [--kind badge|solid|halves] [--scale 2]
+    python3 research/shyguy-probe/sprites.py demo    [--from 1180 --to 1780] [--scale 1]
+    python3 research/shyguy-probe/sprites.py markers [--from 560 --to 1800]
 
 make     writes the three replacement PNGs, named the way Dolphin looks them up, at --scale times the size of
          the originals: "badge" is test art with a pointing arrow and "GO" (so a mirror image is obvious),

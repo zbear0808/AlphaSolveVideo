@@ -4,7 +4,7 @@ A Shy Guy is a flat quad textured with three frames of its walk cycle (RGB5A3 im
 replaces a texture when a PNG named after it is in Load/Textures/GALE01, so one image, fitted to the quad and
 saved under the three names, is drawn wherever the game draws a Shy Guy: same path, same turns and hit
 reactions. Only what is drawn changes, so replays stay in sync. docs/shy-guy-sprite.md has the details and
-tools/shyguy-probe the experiments behind them.
+research/shyguy-probe the experiments behind them.
 
 Only ffmpeg is needed to read and scale the image (any format it reads: PNG with transparency works best).
 """
@@ -25,7 +25,7 @@ STAGE_ID = 8  # Yoshi's Story
 RGB5A3 = 5
 
 # The Shy Guy's quad is 76:72, the shape of its textures. A variant is one disc's names for them (Dolphin's
-# custom texture names); `textures.py diff` in tools/shyguy-probe finds them for a disc.
+# custom texture names); `textures.py diff` in research/shyguy-probe finds them for a disc.
 QUAD_ASPECT = 76 / 72
 
 
@@ -78,7 +78,7 @@ def find_variant(iso: Path) -> Variant:
         if set(variant.textures) <= present:
             return variant
     raise SpriteError(f"{iso} draws Shy Guys with textures this tool doesn't know (it knows "
-                      f"{', '.join(v.name for v in VARIANTS)}); tools/shyguy-probe/textures.py diff finds them")
+                      f"{', '.join(v.name for v in VARIANTS)}); research/shyguy-probe/textures.py diff finds them")
 
 
 def fit_box(image: Tuple[int, int], texture: Tuple[int, int]) -> Tuple[int, int, int, int]:

@@ -26,8 +26,8 @@ python3 -m slp2alpha render REPLAY.slp --animelee --characters-only --scale 2
 
 ## Tools
 
-- `build-iso.sh`: downloads the patch and builds the ISO.
-- `isodiff.py VANILLA.iso MODDED.iso`: compares DOL sections and files.
-- `compare.py REPLAY --vanilla V.iso --animelee A.iso [-- render options]`: renders both and reports frame counts,
-  alpha difference and a contact sheet.
-- `run-matrix.sh V.iso A.iso OUT`: `compare.py` over six cached test replays (needs `tools/render-tests/run.py` to have downloaded them).
+- `build-iso.sh`: downloads the patch and builds the ISO needed by `slp2alpha render --animelee`.
+- Research & comparison scripts are located in [`research/animelee/`](../../research/animelee/README.md):
+  - `isodiff.py`: compares DOL sections and FST files between vanilla and modded ISOs.
+  - `compare.py`: renders both and reports frame counts, alpha difference and a contact sheet.
+  - `run-matrix.sh`: runs `compare.py` over test replays from the cache.
