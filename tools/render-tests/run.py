@@ -36,7 +36,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parents[1]
 SLP2ALPHA = REPO / "tools" / "slp2alpha"
 sys.path.insert(0, str(SLP2ALPHA))
-from slp2alpha import locate, slp, validate  # noqa: E402
+from slp2alpha import camera, locate, slp, validate  # noqa: E402
 
 BLOCK_PAIRS = 300  # pair check granularity: 5 s of gameplay
 NO_SIGNAL = 0.02   # mean pair violation below which a block tells nothing (nothing moved)
@@ -96,9 +96,26 @@ def ffmpeg_values(ffmpeg: str, inputs: List[str], graph: str, files: Dict[str, P
 
 def probe(ffprobe: str, video: Path) -> dict:
     out = subprocess.run([ffprobe, "-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries",
-                          "stream=codec_name,pix_fmt,width,height,nb_read_packets", "-of", "json", str(video)],
-                         capture_output=True, text=True, check=True).stdout
+                          "stream=codec_name,pix_fmt,width,height,nb_read_packets,r_frame_rate", "-of", "json",
+                          str(video)], capture_output=True, text=True, check=True).stdout
     return json.loads(out)["streams"][0]
+
+
+def camera_check(files: List[Path], work: Optional[Path]) -> dict:
+    """For --export-camera renders: the export's own checks (tools/camera-export/validate_camera.py check)."""
+    if not files or not files[0].exists():
+        return {"problems": ["no camera export was written"]}
+    sys.path.insert(0, str(REPO / "tools" / "camera-export"))
+    import validate_camera
+
+    doc = camera.load(files[0])
+    problems = validate_camera.check_export(doc)
+    raw = work / "camera.csv" if work else None
+    if raw and raw.exists():
+        rows = [r for r in camera.read_csv(raw) if doc["frames"]["first"] <= r.frame <= doc["frames"]["last"]]
+        problems += camera.check_rows(rows, doc["stage"]["id"], doc["samples"][0]["mode"] == camera.FIXED)
+    return {"file": files[0].name, "samples": len(doc["samples"]), "video": doc["frames"]["video"],
+            "problems": problems}
 
 
 def decoder_args(video: Path) -> List[str]:
@@ -204,7 +221,9 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
     res["realtime"] = float(m.group(1)) if m else None
     work = re.search(r"work folder kept: (.+)", text)
     work = Path(work.group(1).strip()) if work else None
-    videos = [Path(ln.strip()) for ln in lines if ln.strip().startswith(str(out_dir))]
+    printed = [Path(ln.strip()) for ln in lines if ln.strip().startswith(str(out_dir))]
+    videos = [p for p in printed if p.suffix != ".json"]
+    camera_files = [p for p in printed if p.suffix == ".json"]
 
     ff, fp = locate.find_ffmpeg(), locate.find_ffmpeg(name="ffprobe")
     tmp = Path(tempfile.mkdtemp(prefix="render-test-"))
@@ -214,13 +233,18 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
             res["output"] = {"file": videos[0].name, "codec": pr.get("codec_name"), "pix_fmt": pr.get("pix_fmt"),
                              "size": f"{pr.get('width')}x{pr.get('height')}",
                              "frames": int(pr.get("nb_read_packets", 0)),
+                             "rate": pr.get("r_frame_rate"),
                              "bytes": videos[0].stat().st_size}
             if len(videos) > 1 and videos[1].exists():
-                res["output"]["alpha_map_frames"] = int(probe(fp, videos[1]).get("nb_read_packets", 0))
+                alpha_probe = probe(fp, videos[1])
+                res["output"]["alpha_map_frames"] = int(alpha_probe.get("nb_read_packets", 0))
+                res["output"]["alpha_map_rate"] = alpha_probe.get("r_frame_rate")
             res["alpha"] = alpha_stats(ff, videos[0], tmp)
             sheet = out_dir / "sheet.png"
             contact_sheet(ff, videos[0], res["output"]["frames"], int(pr["width"]), int(pr["height"]), sheet)
             res["sheet"] = str(sheet)
+        if "--export-camera" in args:
+            res["camera"] = camera_check(camera_files, work)
         recordings = sorted(work.rglob("*.mkv")) + sorted(work.rglob("*.avi")) if work and work.exists() else []
         if recordings and not opts.quick:
             res["pairs"] = pair_check(ff, recordings[0], expected, tmp)
@@ -231,7 +255,7 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
         if work and work.exists():
             shutil.rmtree(work, ignore_errors=True)
         if not opts.keep_videos:
-            for v in videos:
+            for v in videos + camera_files:
                 if v.exists():
                     v.unlink()
 
@@ -265,6 +289,16 @@ def problems(res: dict) -> List[str]:
             out.append(f"{o['frames']} frames, expected {lo}..{hi}")
         if "alpha_map_frames" in o and o["alpha_map_frames"] != o["frames"]:
             out.append(f"alpha map has {o['alpha_map_frames']} frames, transparent video {o['frames']}")
+        if "--export-camera" in res["args"]:
+            rates = {o.get("rate"), o.get("alpha_map_rate", o.get("rate"))}
+            if rates != {camera.OUTPUT_RATE}:
+                out.append(f"camera export videos are labelled {sorted(r for r in rates if r)} fps, "
+                           f"not {camera.OUTPUT_RATE}")
+    cam = res.get("camera")
+    if cam:
+        out += [f"camera: {p}" for p in cam["problems"]]
+        if o and "samples" in cam and cam["samples"] not in (o["frames"], o["frames"] - 1):
+            out.append(f"camera: {cam['samples']} samples for {o['frames']} video frames")
     a = res.get("alpha") or {}
     if a:
         floor = 0.8 if "--characters-only" in res["args"] else 0.15

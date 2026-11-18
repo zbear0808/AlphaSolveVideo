@@ -1,0 +1,353 @@
+diff --git a/Source/Core/Core/CMakeLists.txt b/Source/Core/Core/CMakeLists.txt
+index 829688e..019bb3a 100644
+--- a/Source/Core/Core/CMakeLists.txt
++++ b/Source/Core/Core/CMakeLists.txt
+@@ -558,6 +558,8 @@ add_library(core
+   PowerPC/Interpreter/Interpreter_Paired.cpp
+   PowerPC/Interpreter/Interpreter_SystemRegisters.cpp
+   PowerPC/Interpreter/Interpreter_Tables.cpp
++  Slippi/SlippiCameraExport.cpp
++  Slippi/SlippiCameraExport.h
+   Slippi/SlippiGameFileLoader.cpp
+   Slippi/SlippiGameFileLoader.h
+   Slippi/SlippiMatchmaking.cpp
+diff --git a/Source/Core/Core/HW/EXI/EXI_DeviceSlippi.cpp b/Source/Core/Core/HW/EXI/EXI_DeviceSlippi.cpp
+index bcf5bc2..b38db3c 100644
+--- a/Source/Core/Core/HW/EXI/EXI_DeviceSlippi.cpp
++++ b/Source/Core/Core/HW/EXI/EXI_DeviceSlippi.cpp
+@@ -30,6 +30,7 @@
+ #include "Core/Host.h"
+ #include "Core/NetPlayClient.h"
+ #include "Core/PowerPC/PowerPC.h"
++#include "Core/Slippi/SlippiCameraExport.h"
+ #include "Core/Slippi/SlippiMatchmaking.h"
+ 
+ // SlippiTODO: should we remove this import for netplay build?? ifdef?
+@@ -60,6 +61,7 @@ static void endPlaybackOutput(s32 frame_idx)
+   if (g_playback_status->in_slippi_playback && SConfig::GetSlippiConfig().cout_enabled)
+     std::cout << "[PLAYBACK_TERMINATED] " << frame_idx << std::endl;
+   g_playback_status->in_slippi_playback = false;
++  SlippiCameraExport::Close();
+ }
+ #endif
+ 
+@@ -212,6 +214,9 @@ CEXISlippi::~CEXISlippi()
+   }
+ 
+   SlippiSpectateServer::getInstance().endGame(true);
++#ifdef IS_PLAYBACK
++  SlippiCameraExport::Close();
++#endif
+ 
+   // Try to determine whether we were playing an in-progress ranked match, if so
+   // indicate to server that this client has abandoned. Anyone trying to modify
+@@ -1054,6 +1059,12 @@ void CEXISlippi::prepareFrameData(u8* payload)
+   {
+     g_playback_status->current_playback_frame = frame_idx;
+ #ifdef IS_PLAYBACK
++    // The same frames the dump records. Before the marker, so the row is on disk when it's printed.
++    if (SlippiCameraExport::IsEnabled() && watch_settings.start_frame < frame_idx &&
++        frame_idx < watch_settings.end_frame)
++    {
++      SlippiCameraExport::WriteFrame(m_system, frame_idx);
++    }
+     if (SConfig::GetSlippiConfig().cout_enabled && frame_idx >= watch_settings.start_frame)
+       std::cout << "[CURRENT_FRAME] " << frame_idx << std::endl;
+ #endif
+diff --git a/Source/Core/Core/Slippi/SlippiCameraExport.cpp b/Source/Core/Core/Slippi/SlippiCameraExport.cpp
+new file mode 100644
+index 0000000..e6d6b21
+--- /dev/null
++++ b/Source/Core/Core/Slippi/SlippiCameraExport.cpp
+@@ -0,0 +1,217 @@
++// Copyright 2026 AlphaSolveVideo
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#include "Core/Slippi/SlippiCameraExport.h"
++
++#include <array>
++#include <iterator>
++#include <string>
++
++#include <fmt/format.h>
++
++#include "Common/IOFile.h"
++#include "Common/Logging/Log.h"
++#include "Core/ConfigManager.h"
++#include "Core/Core.h"
++#include "Core/PowerPC/MMU.h"
++#include "Core/System.h"
++
++namespace SlippiCameraExport
++{
++namespace
++{
++// Melee NTSC 1.02 (GALE01 revision 2). Layouts from the decomp (doldecomp/melee):
++// src/melee/cm/types.h (Camera), src/sysdolphin/baselib/gobj.h, cobj.h, wobj.h.
++constexpr u32 GAME_CAMERA = 0x80452C68;  // Camera game_camera; its clear colour (+0x08) is 0x80452C70
++constexpr u32 CAM_GOBJ = 0x000;          // HSD_GObj*
++constexpr u32 CAM_MODE = 0x004;          // CameraType
++constexpr u32 CAM_INTEREST = 0x014;      // transform.interest, before shake
++constexpr u32 CAM_POSITION = 0x02C;      // transform.position (the eye), before shake
++constexpr u32 CAM_FOV = 0x044;           // transform.fov, degrees
++constexpr u32 CAM_TRANSLATION = 0x084;   // translation: the screen shake, x and y
++constexpr u32 GOBJ_HSD_OBJ = 0x28;       // HSD_GObj::hsd_obj: the main camera's HSD_CObj
++constexpr u32 COBJ_FLAGS = 0x08;         // bit 0: u is an up vector, not a roll
++constexpr u32 COBJ_VIEWPORT = 0x0C;      // f32 x min, x max, y min, y max
++constexpr u32 COBJ_EYEPOS = 0x24;        // HSD_WObj*
++constexpr u32 COBJ_INTEREST = 0x28;      // HSD_WObj*
++constexpr u32 COBJ_U = 0x2C;             // f32 roll (radians), or Vec3 up
++constexpr u32 COBJ_NEAR = 0x38;
++constexpr u32 COBJ_FAR = 0x3C;
++constexpr u32 COBJ_FOV = 0x40;           // degrees, vertical
++constexpr u32 COBJ_ASPECT = 0x44;
++constexpr u32 COBJ_PROJECTION = 0x50;    // u8, 1 = perspective
++constexpr u32 COBJ_VIEW_MTX = 0x54;      // 3 x 4 f32, row-major
++constexpr u32 WOBJ_POS = 0x0C;           // HSD_WObj::pos
++
++constexpr const char* HEADER =
++    "# alphasolve-camera 1\n"
++    "frame,ok,mode,eye_x,eye_y,eye_z,interest_x,interest_y,interest_z,fov,aspect,near,far,"
++    "flags,u0,u1,u2,proj,vp_x0,vp_x1,vp_y0,vp_y1,shake_x,shake_y,"
++    "t_eye_x,t_eye_y,t_eye_z,t_interest_x,t_interest_y,t_interest_z,t_fov,"
++    "m00,m01,m02,m03,m10,m11,m12,m13,m20,m21,m22,m23\n";
++
++struct Row
++{
++  u32 mode = 0;
++  std::array<float, 3> eye{};
++  std::array<float, 3> interest{};
++  float fov = 0, aspect = 0, near_z = 0, far_z = 0;
++  u32 flags = 0;
++  std::array<float, 3> u{};
++  u32 projection = 0;
++  std::array<float, 4> viewport{};
++  std::array<float, 2> shake{};
++  std::array<float, 3> t_eye{};
++  std::array<float, 3> t_interest{};
++  float t_fov = 0;
++  std::array<float, 12> view{};
++};
++
++std::string s_path;
++File::IOFile s_file;
++bool s_stopped = false;  // closed, or can't write: never (re)open the file
++bool s_warned = false;
++
++template <size_t N>
++void ReadFloats(const Core::CPUThreadGuard& guard, u32 address, std::array<float, N>* out)
++{
++  for (size_t i = 0; i < N; i++)
++    (*out)[i] = PowerPC::MMU::HostRead_F32(guard, address + static_cast<u32>(4 * i));
++}
++
++// The game camera itself is static data and always readable. The camera object behind it exists only
++// once a scene with a camera is running; false if any pointer to it isn't in RAM yet.
++bool Read(const Core::CPUThreadGuard& guard, Row* r)
++{
++  using PowerPC::MMU;
++  const auto ram = [&](u32 address) {
++    return address != 0 && MMU::HostIsRAMAddress(guard, address);
++  };
++
++  r->mode = MMU::HostRead_U32(guard, GAME_CAMERA + CAM_MODE);
++  ReadFloats(guard, GAME_CAMERA + CAM_POSITION, &r->t_eye);
++  ReadFloats(guard, GAME_CAMERA + CAM_INTEREST, &r->t_interest);
++  r->t_fov = MMU::HostRead_F32(guard, GAME_CAMERA + CAM_FOV);
++  ReadFloats(guard, GAME_CAMERA + CAM_TRANSLATION, &r->shake);
++
++  const u32 gobj = MMU::HostRead_U32(guard, GAME_CAMERA + CAM_GOBJ);
++  if (!ram(gobj))
++    return false;
++  const u32 cobj = MMU::HostRead_U32(guard, gobj + GOBJ_HSD_OBJ);
++  if (!ram(cobj))
++    return false;
++  const u32 eye = MMU::HostRead_U32(guard, cobj + COBJ_EYEPOS);
++  const u32 interest = MMU::HostRead_U32(guard, cobj + COBJ_INTEREST);
++  if (!ram(eye) || !ram(interest))
++    return false;
++
++  ReadFloats(guard, eye + WOBJ_POS, &r->eye);
++  ReadFloats(guard, interest + WOBJ_POS, &r->interest);
++  r->fov = MMU::HostRead_F32(guard, cobj + COBJ_FOV);
++  r->aspect = MMU::HostRead_F32(guard, cobj + COBJ_ASPECT);
++  r->near_z = MMU::HostRead_F32(guard, cobj + COBJ_NEAR);
++  r->far_z = MMU::HostRead_F32(guard, cobj + COBJ_FAR);
++  r->flags = MMU::HostRead_U32(guard, cobj + COBJ_FLAGS);
++  ReadFloats(guard, cobj + COBJ_U, &r->u);
++  r->projection = MMU::HostRead_U8(guard, cobj + COBJ_PROJECTION);
++  ReadFloats(guard, cobj + COBJ_VIEWPORT, &r->viewport);
++  ReadFloats(guard, cobj + COBJ_VIEW_MTX, &r->view);
++  return r->projection == 1;
++}
++
++bool EnsureOpen()
++{
++  if (s_file.IsOpen())
++    return true;
++  if (s_path.empty() || s_stopped)
++    return false;
++  s_stopped = true;  // until the file is open and the game is known
++
++  const SConfig& config = SConfig::GetInstance();
++  if (config.GetGameID() != "GALE01" || config.GetRevision() != 2)
++  {
++    ERROR_LOG_FMT(SLIPPI, "Camera export: {} revision {} is not Melee NTSC 1.02; not writing {}",
++                  config.GetGameID(), config.GetRevision(), s_path);
++    return false;
++  }
++  if (!s_file.Open(s_path, "wb") || !s_file.WriteString(HEADER))
++  {
++    ERROR_LOG_FMT(SLIPPI, "Camera export: can't write {}", s_path);
++    s_file.Close();
++    return false;
++  }
++  s_stopped = false;
++  return true;
++}
++
++// Each float in its shortest form that reads back as the same float (fmt's default for float).
++template <typename Container>
++void Append(std::string* line, const Container& values, bool known)
++{
++  for (const auto value : values)
++  {
++    if (known)
++      fmt::format_to(std::back_inserter(*line), ",{}", value);
++    else
++      line->push_back(',');
++  }
++}
++}  // namespace
++
++void SetPath(const std::string& path)
++{
++  s_path = path;
++}
++
++bool IsEnabled()
++{
++  return !s_path.empty() && !s_stopped;
++}
++
++void WriteFrame(Core::System& system, s32 frame_idx)
++{
++  if (!EnsureOpen())
++    return;
++
++  Row r;
++  bool ok;
++  {
++    const Core::CPUThreadGuard guard(system);
++    ok = Read(guard, &r);
++  }
++  if (!ok && !s_warned)
++  {
++    WARN_LOG_FMT(SLIPPI, "Camera export: no main camera object at frame {}", frame_idx);
++    s_warned = true;
++  }
++
++  std::string line = fmt::format("{},{},{}", frame_idx, ok ? 1 : 0, r.mode);
++  Append(&line, r.eye, ok);
++  Append(&line, r.interest, ok);
++  Append(&line, std::array<float, 4>{r.fov, r.aspect, r.near_z, r.far_z}, ok);
++  Append(&line, std::array<u32, 1>{r.flags}, ok);
++  Append(&line, r.u, ok);
++  Append(&line, std::array<u32, 1>{r.projection}, ok);
++  Append(&line, r.viewport, ok);
++  Append(&line, r.shake, true);
++  Append(&line, r.t_eye, true);
++  Append(&line, r.t_interest, true);
++  Append(&line, std::array<float, 1>{r.t_fov}, true);
++  Append(&line, r.view, ok);
++  line.push_back('\n');
++
++  // Flushed row by row: the runner stops Dolphin soon after it sees the last frame's marker.
++  if (!s_file.WriteString(line) || !s_file.Flush())
++  {
++    ERROR_LOG_FMT(SLIPPI, "Camera export: writing {} failed", s_path);
++    Close();
++  }
++}
++
++void Close()
++{
++  if (s_file.IsOpen())
++    s_file.Close();
++  s_stopped = true;
++}
++}  // namespace SlippiCameraExport
+diff --git a/Source/Core/Core/Slippi/SlippiCameraExport.h b/Source/Core/Core/Slippi/SlippiCameraExport.h
+new file mode 100644
+index 0000000..0ca3800
+--- /dev/null
++++ b/Source/Core/Core/Slippi/SlippiCameraExport.h
+@@ -0,0 +1,29 @@
++// Copyright 2026 AlphaSolveVideo
++// SPDX-License-Identifier: GPL-2.0-or-later
++
++#pragma once
++
++#include <string>
++
++#include "Common/CommonTypes.h"
++
++namespace Core
++{
++class System;
++}
++
++// --camera-out: writes Melee's main camera to a CSV file, one row per recorded playback frame.
++// It only reads game memory. Without a path, IsEnabled() is false and nothing else runs.
++namespace SlippiCameraExport
++{
++void SetPath(const std::string& path);
++bool IsEnabled();
++
++// On the CPU thread, when playback advances to frame_idx (CEXISlippi::prepareFrameData). Slippi asks
++// for frame L between the draws of frames L-1 and L, so the camera object holds what the draw of
++// frame L-1 used: the picture the frame dump labels L.
++void WriteFrame(Core::System& system, s32 frame_idx);
++
++// Flushes and closes the file; nothing is written after this.
++void Close();
++}  // namespace SlippiCameraExport
+diff --git a/Source/Core/DolphinNoGUI/MainNoGUI.cpp b/Source/Core/DolphinNoGUI/MainNoGUI.cpp
+index 703e67a..a37fd6c 100644
+--- a/Source/Core/DolphinNoGUI/MainNoGUI.cpp
++++ b/Source/Core/DolphinNoGUI/MainNoGUI.cpp
+@@ -26,6 +26,9 @@
+ #include "Core/DolphinAnalytics.h"
+ #include "Core/Host.h"
+ #include "Core/System.h"
++#ifdef IS_PLAYBACK
++#include "Core/Slippi/SlippiCameraExport.h"
++#endif
+ 
+ #include "UICommon/CommandLineParse.h"
+ #ifdef USE_DISCORD_PRESENCE
+@@ -321,6 +324,8 @@ int main(int argc, char* argv[])
+     SConfig::GetSlippiConfig().slippi_input = "Slippi/playback.txt";
+   }
+   SConfig::GetSlippiConfig().cout_enabled = options.is_set("cout");
++  if (options.is_set("camera_out"))
++    SlippiCameraExport::SetPath(static_cast<const char*>(options.get("camera_out")));
+ #endif
+ 
+   if (save_state_path && !game_specified)
+diff --git a/Source/Core/UICommon/CommandLineParse.cpp b/Source/Core/UICommon/CommandLineParse.cpp
+index bdbf2d1..9574179 100644
+--- a/Source/Core/UICommon/CommandLineParse.cpp
++++ b/Source/Core/UICommon/CommandLineParse.cpp
+@@ -136,6 +136,11 @@ std::unique_ptr<optparse::OptionParser> CreateParser(ParserOptions options)
+   parser->add_option("--cout")
+       .action("store_true")
+       .help("Print playback progress markers ([CURRENT_FRAME] etc.) to stdout");
++  parser->add_option("--camera-out")
++      .action("store")
++      .metavar("<file>")
++      .type("string")
++      .help("Write Melee's camera on every recorded playback frame to this CSV file");
+ #endif
+ 
+   return parser;

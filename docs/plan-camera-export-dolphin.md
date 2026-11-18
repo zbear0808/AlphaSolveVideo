@@ -1,6 +1,15 @@
 # Camera export, part 1: Dolphin patch and export file
 
-Status: plan, November 2026. One of three: this file (reading the camera, writing the export), [the Blender importer](plan-camera-export-blender.md), [the validation](plan-camera-export-validation.md).
+Status: implemented, November 2026; [`camera-export.md`](camera-export.md) describes what exists and what the checks measured. This plan is kept for its reasoning. One of three: this file (reading the camera, writing the export), [the Blender importer](plan-camera-export-blender.md), [the validation](plan-camera-export-validation.md).
+
+What changed while building it:
+
+- **The path stays out of `SlippiConfig.h`.** It's a static in `SlippiCameraExport.cpp`, set by `SetPath()` (section 4.1 already said why). The patch rebuilt in 7 seconds.
+- **The CSV has 43 columns**, not 45.
+- **Near and far vary by stage.** Final Destination uses 1 and 30000 (`Camera_800311DC`, `Camera_800311CC`), so the checks only require 0 < near < far, and a sample carries `near` and `far` where they differ from the file's `projection`.
+- **Camera exports get "60 fps" in their file names**, so a render without the export can't overwrite their videos with 59.94 ones.
+- **The fixed camera's look-at point is computed with the game's own polynomial sine and cosine** (`lbvector_sin`), which `projection.game_interest` now reproduces. That point is 0.2 to 1 unit higher than `projection.Camera.interest`.
+- **A whole render's extra last frame is the game's last frame**, not a quit-out's pause screen (section 5's guess). Every replay that ends on stocks or time records one more picture than its frame numbers: the game's last frame, drawn after the replay's last frame request. Slippi's `FetchGameFrame.asm` skips the request once the game has ended, so there's no moment to read that camera, and the export leaves that one frame without a sample (`frames.replay_last` says where the replay ends). Quit-outs don't record the extra picture.
 
 **Goal.** `python3 -m slp2alpha render REPLAY --export-camera` writes `camera - NAME.json` next to `fullTransparent - NAME.mov`. For every frame of the video it holds the camera the game drew that frame with: eye, look-at point, vertical field of view, roll and screen shake, in the replay's own units. The camera is only read. The game, the replay's sync and the video stay exactly as they are.
 

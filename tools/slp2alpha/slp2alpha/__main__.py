@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import List, Optional
 
-from . import config, gecko, locate, runner, shyguy, slp, solve, stages, validate
+from . import camera, config, gecko, locate, runner, shyguy, slp, solve, stages, validate
 
 
 def cmd_info(args) -> int:
@@ -209,7 +209,9 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
                                        (args.characters_only, "characters only"),
                                        (args.static_camera, "static camera"),
                                        (args.animelee, "animelee"),
-                                       (sprite, "shy guy sprite")) if on]
+                                       (sprite, "shy guy sprite"),
+                                       # labelled 60 fps: kept apart from a 59.94 render of the same replay
+                                       (args.export_camera, "60 fps")) if on]
     name = replay_path.stem + (f" ({', '.join(variant)})" if variant else "")
     work = Path(tempfile.mkdtemp(prefix="slp2alpha-"))
     user, logs = work / "user", work / "logs"
@@ -226,6 +228,10 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     clip_frames = last - first + 1
     skip_frames = max(0, start_frame - slp.FIRST_FRAME)
     boot_timeout = args.boot_timeout + skip_frames / MIN_SKIP_FPS
+    # Only camera exports read the camera in Dolphin, and only they relabel their videos as 60 fps.
+    camera_csv = work / "camera.csv" if args.export_camera else None
+    dolphin_extra = [camera.DOLPHIN_OPTION, str(camera_csv)] if camera_csv else []
+    output_rate = camera.OUTPUT_RATE if camera_csv else None
 
     if is_clip:
         print(f"{replay_path.name}: {stage}, frames {first} to {last} ({clip_frames / 60:.1f} s) "
@@ -246,7 +252,7 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
         try:
             box["res"] = runner.run_dolphin(dolphin, iso, comm, user, dump, logs, stop_at_frame=last,
                                             boot_timeout=boot_timeout, on_progress=on_progress,
-                                            grace_seconds=1.0)
+                                            grace_seconds=1.0, extra_args=dolphin_extra)
         finally:
             dolphin_done.set()
 
@@ -274,7 +280,7 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
             rate = validate.probe(ffprobe, video).rate
             outputs = solve.solve(ffmpeg, video, out_dir, name, pairing.first_color, pairing.offset,
                                   fmt=args.format, pairs=expected_pairs, show_progress=False, rate=rate,
-                                  source=solve.GrowingFile(Path(video), dolphin_done))
+                                  source=solve.GrowingFile(Path(video), dolphin_done), output_rate=output_rate)
     worker.join()
     sys.stderr.write("\n")
     t_rendered = time.monotonic()
@@ -293,13 +299,24 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     report = validate.quick_check(ffmpeg, ffprobe, video, expected_pairs)
     for problem in report.problems(expected_frames=2 * expected_pairs):
         print(f"  warning: {problem}", file=sys.stderr)
+    pairs = min(expected_pairs, solve.pair_count(report.probe.frames, report.pairing.offset))
     if outputs is None:
-        pairs = min(expected_pairs, solve.pair_count(report.probe.frames, report.pairing.offset))
         outputs = solve.solve(ffmpeg, video, out_dir, name, report.pairing.first_color, report.pairing.offset,
-                              fmt=args.format, pairs=pairs, show_progress=False, rate=report.probe.rate)
+                              fmt=args.format, pairs=pairs, show_progress=False, rate=report.probe.rate,
+                              output_rate=output_rate)
     elif (report.pairing.first_color, report.pairing.offset) != (pairing.first_color, pairing.offset):
         print(f"  warning: pairing from the first frames ({pairing.first_color}/{pairing.offset}) differs from "
               f"the full recording's ({report.pairing.first_color}/{report.pairing.offset})", file=sys.stderr)
+    camera_json = None
+    if camera_csv:
+        camera_json, problems = camera.build(
+            camera_csv, camera.export_path(out_dir, name), first=first, video_frames=pairs,
+            replay_last=replay.last_frame, stage_id=replay.stage_id, static_camera=args.static_camera,
+            replay=replay_path, stage_name=stage, width=report.probe.width, height=report.probe.height,
+            scale=args.scale, fps=camera.OUTPUT_RATE, transparent=outputs.transparent, alpha_map=outputs.alpha_map,
+            iso="animelee" if args.animelee else "vanilla", codes=enabled)
+        for problem in problems:
+            print(f"  warning: camera: {problem}", file=sys.stderr)
     t_done = time.monotonic()
     game_seconds = clip_frames / 60
     timing = (f"Dolphin and solver together {t_rendered - t_start:.0f} s, then checks {t_done - t_rendered:.0f} s"
@@ -307,6 +324,8 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     print(f"  done in {t_done - t_start:.0f} s ({timing}) for {game_seconds:.0f} s of gameplay: "
           f"{game_seconds / (t_done - t_start):.2f}x real time")
     print(f"  {outputs.transparent}\n  {outputs.alpha_map}")
+    if camera_json:
+        print(f"  {camera_json}")
     if args.keep:
         print(f"  work folder kept: {work}")
     else:
@@ -332,6 +351,15 @@ def cmd_render(args) -> int:
     if args.shy_guy_sprite and engine != config.MAINLINE:
         print("error: --shy-guy-sprite needs the headless mainline build", file=sys.stderr)
         return 2
+    if args.export_camera:
+        problem = ("it needs the headless mainline build" if engine != config.MAINLINE else
+                   "GIFs are resampled to 50 fps, so their frames aren't game frames" if args.format == "gif" else
+                   f"{dolphin} has no {camera.DOLPHIN_OPTION} option: rebuild it with "
+                   "tools/dolphin-build/build-mac-mainline.sh" if camera.DOLPHIN_OPTION not in
+                   runner.dolphin_options(dolphin) else None)
+        if problem:
+            print(f"error: --export-camera can't be used like this: {problem}", file=sys.stderr)
+            return 2
     if engine != config.MAINLINE and not args.allow_window:
         print(f"error: {dolphin} is not the headless build: it would open a window that flashes black and "
               "white (EPILEPSY WARNING). Build the headless one with tools/dolphin-build/build-mac-mainline.sh, "
@@ -387,6 +415,10 @@ def main(argv=None) -> int:
                     help="Yoshi's Story, with --characters-only: draw the Shy Guys with this image instead of "
                          "the game's art (PNG with transparency works best). It is fitted inside the Shy Guy's "
                          "square and moves with it, mirrored when it faces left (docs/shy-guy-sprite.md)")
+    pr.add_argument("--export-camera", action="store_true",
+                    help="also write 'camera - NAME.json': Melee's camera on every frame of the video (eye, look-at "
+                         "point, field of view, shake), for Blender (tools/camera-export). The videos are then "
+                         "labelled exactly 60 fps (docs/camera-export.md)")
     pr.add_argument("--dolphin", help="Slippi playback Dolphin .app or executable (default: packages/)")
     pr.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
     pr.add_argument("--animelee", action="store_true",

@@ -23,6 +23,7 @@ python3 -m slp2alpha render replay.slp --characters-only
   - `--start-frame N --end-frame M`: renders combo clips directly from Slippi frame numbers.
   - `--shy-guy-sprite IMAGE`: draws Yoshi's Story Shy Guys with your own image or logo.
   - `--animelee`: renders with Animelee cel-shaded skins.
+  - `--export-camera`: also writes Melee's camera on every frame, for Blender ([`tools/camera-export`](tools/camera-export/README.md)).
 - **Documentation & Research:** See the [**Documentation Index**](docs/README.md) for feature guides, reverse engineering research, and architecture plans.
 - **Testing:** See [`tools/render-tests/`](tools/render-tests/README.md) for the regression test harness.
 - **Reverse Engineering & Probes:** See [`research/`](research/README.md) for calibration and probe tools.

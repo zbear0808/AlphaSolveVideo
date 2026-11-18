@@ -15,6 +15,7 @@ Guides for features integrated into `python3 -m slp2alpha render`:
 | **[Custom Shy Guy Sprites](shy-guy-sprite.md)** | Replace Yoshi's Story Shy Guys with a custom logo or image via Dolphin custom textures. | `--shy-guy-sprite`, `--scale` |
 | **[Animelee Cel-Shaded Skins](../tools/animelee/README.md)** | Render replays with Animelee's cel-shaded character models and stages. | `--animelee`, `tools/animelee/build-iso.sh` |
 | **[Logo as the Stage](logo-stage.md)** | Fighters over a 3D logo sized to the stage, seen through Melee's own camera. | `tools/logo-stage/logo_stage.py`, `--animelee` |
+| **[Camera Export](camera-export.md)** | Melee's camera on every frame of a render, and an importer that turns it into a Blender camera. | `--export-camera`, `tools/camera-export` |
 
 ---
 

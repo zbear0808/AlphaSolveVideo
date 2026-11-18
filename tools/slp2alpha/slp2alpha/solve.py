@@ -69,7 +69,8 @@ class SolveOutputs:
 
 
 def filter_graph(first_color: str, offset: int, fmt: OutputFormat, rate: str = DEFAULT_FIELD_RATE) -> str:
-    """rate: the recording's field rate, which is also the output frame rate (one frame per game frame).
+    """rate: the output frame rate, one frame per game frame. That's the recording's field rate unless solve()
+    is given another (output_rate).
 
     Black and white frames are matched by their position, not their timestamps: the blend filters pair
     inputs by timestamp, and recordings with millisecond timestamps (Matroska) would otherwise sometimes
@@ -174,8 +175,13 @@ class GrowingFile:
 
 def solve(ffmpeg: str, video: str, out_dir: Path, name: str, first_color: str, offset: int,
           fmt: str = DEFAULT_FORMAT, pairs: Optional[int] = None, show_progress: bool = True,
-          rate: str = DEFAULT_FIELD_RATE, source: Optional[GrowingFile] = None) -> SolveOutputs:
-    """Solve a recording; with source, read it while it is still being recorded (video is ignored)."""
+          rate: str = DEFAULT_FIELD_RATE, source: Optional[GrowingFile] = None,
+          output_rate: Optional[str] = None) -> SolveOutputs:
+    """Solve a recording; with source, read it while it is still being recorded (video is ignored).
+
+    output_rate labels the outputs with that frame rate instead of the recording's `rate`: the same frames, one
+    per game frame, at other timestamps (camera exports use exactly 60/1). Not for GIF, which resamples to 50 fps.
+    """
     if fmt not in FORMATS:
         raise ValueError(f"unknown format {fmt!r}; choose from {', '.join(FORMATS)}")
     Path(out_dir).mkdir(parents=True, exist_ok=True)
@@ -184,10 +190,12 @@ def solve(ffmpeg: str, video: str, out_dir: Path, name: str, first_color: str, o
     for i, spec in enumerate(choices):
         cmd: List[str] = [ffmpeg, "-nostdin", "-y", "-v", "error"] + (["-stats"] if show_progress else [])
         cmd += ["-f", "matroska", "-i", "pipe:0"] if source else ["-i", video]
-        cmd += ["-filter_complex", filter_graph(first_color, offset, spec, rate)]
+        cmd += ["-filter_complex", filter_graph(first_color, offset, spec, output_rate or rate)]
         limit = ["-frames:v", str(pairs)] if pairs else []
-        cmd += ["-map", "[fg]"] + limit + spec.video_args + [str(outputs.transparent)]
-        cmd += ["-map", "[mapGif]" if spec.gif else "[mapOut]"] + limit + spec.map_args + [str(outputs.alpha_map)]
+        # Without -r, ffmpeg keeps the recording's rate as the stream's and rounds the new timestamps into it.
+        relabel = ["-r", output_rate] if output_rate and not spec.gif else []
+        cmd += ["-map", "[fg]"] + limit + relabel + spec.video_args + [str(outputs.transparent)]
+        cmd += ["-map", "[mapGif]" if spec.gif else "[mapOut]"] + limit + relabel + spec.map_args + [str(outputs.alpha_map)]
         if source:
             proc = subprocess.Popen(cmd, stdin=subprocess.PIPE)
             feeder = threading.Thread(target=source.pump, args=(proc.stdin,), daemon=True)

@@ -6,7 +6,8 @@
 # no window at all (-p headless), so renders happen in the background.
 #
 # Source: project-slippi/dolphin, branch fix/mainline-playback (PR #40), pinned below, plus
-# tools/dolphin-build/patches-mainline/*.patch (--cout progress markers, frame-dump gating, clang fix).
+# tools/dolphin-build/patches-mainline/*.patch (--cout progress markers, frame-dump gating, clang fix, and
+# --camera-out, the camera export).
 #
 # Usage: build-mac-mainline.sh [fetch|configure|build|bundle|all]   (default: all)
 # Environment:

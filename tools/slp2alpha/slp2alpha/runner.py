@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 import os
 import plistlib
 import re
@@ -11,11 +12,12 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, FrozenSet, List, Optional
 
 from . import config
 
 _MARKER = re.compile(r"^\[([A-Z_]+)\](?:\s+(-?\d+|.+))?\s*$")
+_HELP_OPTION = re.compile(r"(?<![\w-])(--[a-z][a-z0-9_-]*)")
 MAINLINE_EXECUTABLE = "dolphin-emu-nogui"
 
 
@@ -71,6 +73,25 @@ def engine_of(app_or_exe: Path) -> str:
     """Which playback build this is: the headless mainline build or Ishiiruka."""
     name = dolphin_executable(app_or_exe).name.lower()
     return config.MAINLINE if name.startswith(MAINLINE_EXECUTABLE) else config.ISHIIRUKA
+
+
+@functools.lru_cache(maxsize=None)
+def _help_options(exe: str, mtime: float) -> FrozenSet[str]:
+    try:
+        out = subprocess.run([exe, "--help"], stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return frozenset()
+    return frozenset(_HELP_OPTION.findall(out.stdout + out.stderr))
+
+
+def dolphin_options(app_or_exe: Path) -> FrozenSet[str]:
+    """The long options a Dolphin build lists in --help, e.g. "--camera-out" on builds with that patch."""
+    exe = dolphin_executable(app_or_exe)
+    try:
+        mtime = exe.stat().st_mtime
+    except OSError:
+        return frozenset()
+    return _help_options(str(exe), mtime)
 
 
 def dolphin_args(engine: str, exe: Path, iso: Path, comm_file: Path, user_dir: Path, dump_dir: Path) -> List[str]:

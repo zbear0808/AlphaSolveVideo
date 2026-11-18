@@ -3,7 +3,7 @@
   "notes": "Public replays from Slippi Lab, picked to cover all six legal stages, doubles, projectile and item characters, console-recorded replays and a short quit-out. Each entry lists the extra render arguments to test; [] is a default render.",
   "replays": [
     {"file": "DishonestMuddyCoyote.slp", "label": "BF: Fox vs Falco (lasers, shine)",
-     "renders": [[], ["--characters-only"], ["--static-camera"]]},
+     "renders": [[], ["--characters-only"], ["--static-camera"], ["--export-camera"]]},
     {"file": "BlindComposedToad.slp", "label": "BF doubles: Fox, Sheik, Fox, Peach",
      "renders": [[], ["--characters-only"]]},
     {"file": "SurprisedRepentantBuffalo.slp", "label": "BF: Ness vs Yoshi (console replay)",
@@ -15,7 +15,7 @@
     {"file": "SpectacularScalyFlamingo.slp", "label": "DL: 12 s quit-out (output formats and options)",
      "renders": [[], ["--scale", "2"], ["--no-stream"], ["--format", "hevc"], ["--format", "mkv"],
                  ["--format", "webm"], ["--format", "png"], ["--format", "gif"],
-                 ["--characters-only", "--start-frame", "200", "--end-frame", "400"]]},
+                 ["--characters-only", "--start-frame", "200", "--end-frame", "400"], ["--export-camera"]]},
     {"file": "RundownSparklingBuffalo.slp", "label": "FD: Sheik vs Samus (missiles, charge shot)",
      "renders": [["--characters-only"]]},
     {"file": "LimpYearlyFly.slp", "label": "FD: Ice Climbers vs Sheik",
@@ -25,6 +25,7 @@
     {"file": "RichAuthenticGull.slp", "label": "YS: Falco vs Jigglypuff, 156 s (Shy Guys)",
      "renders": [["--characters-only"],
                  ["--characters-only", "--start-frame", "8500", "--end-frame", "8800"],
+                 ["--characters-only", "--export-camera", "--start-frame", "8500", "--end-frame", "8800"],
                  ["--characters-only", "--start-frame", "9200"],
                  ["--characters-only", "--static-camera", "--shy-guy-sprite", "{tests}/shy-guy-sprite.png",
                   "--start-frame", "1500", "--end-frame", "1800"]]},
@@ -33,7 +34,8 @@
     {"file": "PutridAgreeableWeasel.slp", "label": "FoD: Dr. Mario vs Fox (console replay)",
      "renders": [["--characters-only"]]},
     {"file": "EqualPresentCockroach.slp", "label": "PS: Fox vs Falco, 157 s online (transformations)",
-     "renders": [["--characters-only"], ["--characters-only", "--static-camera"]]},
+     "renders": [["--characters-only"], ["--characters-only", "--static-camera"],
+                 ["--characters-only", "--static-camera", "--export-camera"]]},
     {"file": "DistortedOblongCrab.slp", "label": "PS: Pikachu vs Game & Watch (console, frozen Stadium)",
      "renders": [["--characters-only"]]}
   ]

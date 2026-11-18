@@ -1,6 +1,14 @@
 # Camera export, part 3: validation
 
-Status: plan, November 2026. One of three: [reading the camera and the export file](plan-camera-export-dolphin.md), [the Blender importer](plan-camera-export-blender.md), this file.
+Status: implemented, November 2026, as `tools/camera-export/validate_camera.py`; [`camera-export.md`](camera-export.md) has the results. This plan is kept for its reasoning. One of three: [reading the camera and the export file](plan-camera-export-dolphin.md), [the Blender importer](plan-camera-export-blender.md), this file.
+
+What changed while building it:
+
+- **`track` decides by slopes, not by a 1.5× margin.** At the right alignment the spread was the smallest on two of three replays, but its neighbours were only 1.1 to 1.25 times larger. A fighter's own animation is most of the spread, so a margin can't separate the offsets. `track` now fits how far the measured fighters follow a one-frame shift of the camera or of the fighters. A right alignment gives about 0 and a wrong one about ±1, and the fit has to land within half a frame of 0. Camera shifts are fitted only on fighters standing still, because a running fighter leans with its motion and the camera follows that motion. The spread only has to be smallest at camera offset 0.
+- **`readonly` hides effects.** Dust and smoke differ by a few pixels between two runs even with nothing changed: 6 of 600 fields on the Battlefield clip.
+- **`blender` allows 0.001 px at the centre**, not 1e-4. Blender's float32 matrices put the look-at point 0.0002 px off.
+- **`stage` (section 5) isn't built**, and `static` compares with `projection.game_interest` (see part 1).
+- **One video frame can be without a sample:** the game's last frame of a replay that ends on stocks or time (see part 1). `check` and the render tests allow exactly that one, and only when the export's last sample is the replay's last frame.
 
 The export is only worth having if it's exact. The validation has to show five things:
 

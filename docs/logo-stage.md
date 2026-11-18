@@ -55,7 +55,7 @@ Yoshi's Story's ledges are 3.5 below the flat top (its sides slope down to them)
 ## What it doesn't do
 
 - **Platforms.** With the stage hidden, nothing draws the floating platforms (Battlefield's three, Dream Land's three, Yoshi's Story's two, Fountain's three, Stadium's two): fighters stand on nothing there. `stagedata.py` has their positions for the stages where they stay put (Battlefield, Dream Land, Yoshi's Story's sides); drawing them as metal bars isn't built.
-- **Camera moves.** The camera is the stage's fixed camera for the whole replay (`--static-camera`). The camera lives in game memory, so a per-frame export from Dolphin would feed a moving camera into `projection.Camera` and the Blender script, but that export doesn't exist.
+- **Camera moves.** The camera is the stage's fixed camera for the whole replay (`--static-camera`). `render --export-camera` now writes the moving camera of every frame ([camera export](camera-export.md)), but the logo isn't rendered with it yet.
 - **Shadows and the stage's moving parts.** Fighter shadows disappear with the stage (see `docs/characters-only-research.md`), and nothing of the stage's hazards or transformations is drawn.
 - **The logo comes from the metal project.** Its `SM_Logo_Hero` is used for both finishes; the cel finish is the kitty project's look written into `blender_plate.py`, so only the metal project has to exist.
 
