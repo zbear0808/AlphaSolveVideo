@@ -13,7 +13,7 @@ Guides for features integrated into `python3 -m slp2alpha render`:
 | **[Rendering Clips](clips.md)** | Render specific frame ranges (e.g., combos) without rendering entire replays. | `--start-frame`, `--end-frame` |
 | **[Static Camera](static-camera.md)** | Lock the camera in place using Melee's fixed-camera mode with screen shake disabled. | `--static-camera` |
 | **[Custom Shy Guy Sprites](shy-guy-sprite.md)** | Replace Yoshi's Story Shy Guys with a custom logo or image via Dolphin custom textures. | `--shy-guy-sprite`, `--scale` |
-| **[Animelee Cel-Shaded Skins](../tools/animelee/README.md)** | Render replays with Animelee's cel-shaded character models and stages. | `--animelee`, `tools/animelee/build-iso.sh` |
+| **[Animelee Cel-Shaded Skins](../tools/animelee/README.md)** | Render replays with Animelee's cel-shaded character models and stages. | `--animelee`, `tools/animelee/build_iso.py` |
 | **[Logo as the Stage](logo-stage.md)** | Fighters over a 3D logo sized to the stage, seen through Melee's own camera. | `tools/logo-stage/logo_stage.py`, `--animelee` |
 | **[Camera Export](camera-export.md)** | Melee's camera on every frame of a render, and an importer that turns it into a Blender camera. | `--export-camera`, `tools/camera-export` |
 
@@ -39,7 +39,8 @@ Design specifications and cross-platform planning:
 |---|---|
 | **[macOS Implementation Plan](plan-macos-apple-silicon.md)** | Architecture, benchmarks, and current status of the native Apple Silicon unattended pipeline (`slp2alpha` + headless mainline Dolphin + Metal + FFV1). |
 | **[Windows Automation Plan](plan-windows.md)** | Scoping, architecture, and effort estimate for one-command automation on Windows with Slippi's official (Ishiiruka) playback build. |
-| **[Windows: Mainline Build and Camera Export](plan-windows-mainline.md)** | Building the patched headless mainline Dolphin for Windows (GitHub Actions or locally), and the slp2alpha changes, so `--export-camera` and window-free renders work there. |
+| **[Windows: Mainline Build and Camera Export](plan-windows-mainline.md)** | Building the patched headless mainline Dolphin for Windows (GitHub Actions or locally), and the slp2alpha changes, so `--export-camera` and window-free renders work there. Partly implemented. |
+| **[Windows: Remaining Work](plan-windows-remaining.md)** | What's left to do on a Windows machine, in order: build the package, the first render, the camera export against the Mac's, the render tests. |
 | **[Camera Export: Dolphin Patch](plan-camera-export-dolphin.md)** | Reading the game camera in Dolphin on every recorded frame and writing `camera - NAME.json` (`render --export-camera`). |
 | **[Camera Export: Blender Importer](plan-camera-export-blender.md)** | An animated Blender camera that matches the rendered video frame for frame. |
 | **[Camera Export: Validation](plan-camera-export-validation.md)** | Checks that the exported camera is what the game drew with, on the right frames, and that Blender reproduces it. |

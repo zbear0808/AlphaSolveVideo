@@ -1,6 +1,22 @@
 # Windows: the patched mainline Dolphin and the camera export
 
-Status: plan, November 2026. Nothing in it has run on Windows yet. No Windows PC was available, so everything that needs Windows to run is [to test] or [estimate]. The source facts come from the pinned Dolphin checkout (`~/Library/Caches/AlphaSolveVideo/mainline`, commit `c5f6359`, patches 0001–0004 applied).
+Status: partly implemented, November 2026. Everything that doesn't need a Windows machine is done, but nothing has run on Windows yet: no Windows PC was available, so everything that needs Windows to run is [to test] or [estimate]. [`plan-windows-remaining.md`](plan-windows-remaining.md) has the work that's left, in order. The source facts come from the pinned Dolphin checkout (`~/Library/Caches/AlphaSolveVideo/mainline`, commit `c5f6359`, with this repo's patches applied).
+
+What was done, and what changed from this plan while doing it:
+
+- **The build script is Python, not PowerShell:** `tools/dolphin-build/build-windows-mainline.py`. slp2alpha needs Python on Windows anyway, and the script's fetch and patch steps ran on the Mac. It loads the compiler environment itself (`vcvars64.bat`, found with `vswhere`) when `cl.exe` isn't on the PATH. Appendix A lists where each part is.
+- **The workflow** is `.github/workflows/dolphin-windows.yml`. It runs only when started by hand, so a push never starts a 30-minute build.
+- **The FFmpeg (F1) is pinned:** BtbN's month-end build of 31 October 2026, `ffmpeg-n8.1.3-27-g8dca1586f4-win64-lgpl-shared-8.1.zip`, SHA-256 `5cef7bc4…56ab`. Its `avformat-62.dll` has the Matroska muxer and `avcodec-62.dll` the FFV1 encoder. Its `.def` files export only functions, no data, which keeps linking with MSVC simple [verified: the zip's contents].
+- **Patches.** 0004 now initializes `ok`, and 0005 adds the Ctrl+Break handler. The Mac build applies all five, and its camera export is unchanged: identical samples before and after [verified].
+- **Detecting applied patches** changed in both build scripts. A patch only reverse-checks on its own while nothing is applied on top of it. Since 0004 edits lines next to 0002's, `build-mac-mainline.sh fetch`, `configure` and `all` stopped with an error on an already-patched tree [verified]. That didn't show, because only `build` and `bundle` had run since. Both scripts now look for the last patch that reverse-checks, and apply the ones after it.
+- **slp2alpha also stops Dolphin when it exits**, for example after Ctrl+C. Renders run Dolphin on a worker thread, whose clean-up doesn't run at exit, and Dolphin is in its own process group, so the Ctrl+C doesn't reach it. On the Mac it died anyway, from a broken pipe on its next progress line [verified]. On Windows a broken pipe doesn't end a program, so it would have kept running [estimate]. On the Mac, the recording now gets a clean end too [verified].
+- **`render --backend`** picks the video backend: `D3D12` or `Vulkan` if Direct3D 11 can't record without a window.
+- **`--format` checks the encoder first,** on every platform. `--format hevc` without VideoToolbox stops with a message, and the render tests skip it (status SKIP).
+- **Ishiiruka on Windows** is stopped with WM_CLOSE to its window, because it's a window program that Ctrl+Break doesn't reach.
+- **Text and paths.** Tool output is decoded as UTF-8, and Python children are told to write UTF-8. Text files are read and written as UTF-8. The render tests no longer put file paths inside ffmpeg filter strings, which a Windows drive letter's colon would break.
+- **`tools/animelee/build-iso.sh` is now `build_iso.py`.** It built a byte-identical ISO on the Mac [verified], and needs only `xdelta3` besides Python.
+- **One cache folder for everything:** `locate.cache_root()`, `%LOCALAPPDATA%\AlphaSolveVideo` on Windows, or `$ALPHASOLVE_CACHE`.
+- **A Mac camera export to compare against** is in `tools/camera-export/reference/`.
 
 Companion to [`plan-windows.md`](plan-windows.md), which automates Slippi's official Windows playback build (Ishiiruka 3.5.2). That route needs no build, but it can't export the camera and it opens a window. This plan brings the macOS build to Windows: Slippi's mainline playback Dolphin, headless, with this repo's patches. The patches are described in [`plan-macos-apple-silicon.md`](plan-macos-apple-silicon.md) and [`plan-camera-export-dolphin.md`](plan-camera-export-dolphin.md).
 
@@ -23,7 +39,7 @@ Evidence tags:
   2. **Stopping Dolphin.** Windows has no SIGTERM. A one-line patch (0005) makes Ctrl+Break stop Dolphin cleanly, and slp2alpha sends it (section 3.6).
   3. **Line endings.** Git for Windows would check the patches out with CRLF line endings, and then they no longer apply (section 3.2).
   4. **Small Mac-only spots in slp2alpha and the tools:** process groups, the Metal default, paths (section 5).
-- **Where to build.** GitHub Actions in the fork is the recommended route. It needs no Windows development setup, and the result is a zip to unpack into `packages\`. A PowerShell script does the build, so a local build on a Windows PC runs the same steps (section 4).
+- **Where to build.** GitHub Actions in the fork is the recommended route. It needs no Windows development setup, and the result is a zip to unpack into `packages\`. A Python script does the build (`tools/dolphin-build/build-windows-mainline.py`), so a local build on a Windows PC runs the same steps (section 4).
 - **Effort.** About 2.5–3.5 days, plus waiting for CI runs (about 30 minutes each). A Windows PC is needed only for the last day: the first real renders and the checks (section 9).
 
 ## 2. What changes from macOS
@@ -128,6 +144,8 @@ The package goes in `packages\slippi-playback-mainline\`, the folder that holds 
 
 ### 3.6 Patch changes
 
+Both are in the repo, and the Mac builds and runs with them.
+
 - **0004: initialize `ok`.**
   - **Why.** `bool ok;` (`SlippiCameraExport.cpp:177`) is assigned on every path before it's used. But MSVC's C4701 warning ("potentially uninitialized") is level 4, which `/WX` turns into an error, and `bool ok = false;` rules it out.
   - **Then:**
@@ -158,15 +176,15 @@ The package goes in `packages\slippi-playback-mainline\`, the folder that holds 
 
 ## 4. GitHub Actions
 
-A workflow in this repo, `.github/workflows/dolphin-windows.yml`, builds the package and uploads it as a zip (Appendix B).
+A workflow in this repo, `.github/workflows/dolphin-windows.yml`, builds the package and uploads it as a zip (Appendix A).
 
-- **Runner.** `windows-2022`, as Slippi's CI. Triggered by hand (`workflow_dispatch`) and by changes to `tools/dolphin-build/**`.
+- **Runner.** `windows-2022`, as Slippi's CI. Started by hand only (`workflow_dispatch`).
 - **Steps:**
   1. `git config --global core.autocrlf false`, then check out this repo.
   2. Load the MSVC environment (`egor-tensin/vs-shell@v2`) and install Rust 1.88.0.
-  3. Run `tools/dolphin-build/build-windows-mainline.ps1 all` (Appendix A). The script makes its own CMake 3.31 venv, as the Mac script does.
-  4. Upload `packages\slippi-playback-mainline` as an artifact.
-- **Cache.** Cache the FFmpeg zip, and optionally the build folder. With the build folder cached, a rebuild after a patch change takes minutes instead of half an hour [estimate].
+  3. Run `python tools/dolphin-build/build-windows-mainline.py all` (Appendix A). The script makes its own CMake 3.31 venv, as the Mac script does.
+  4. Upload `packages\slippi-playback-mainline` as an artifact, and the build logs.
+- **Cache.** None yet: the FFmpeg zip takes seconds to download on a runner. Caching the build folder would make a rebuild after a patch change take minutes instead of half an hour [estimate].
 - **What CI can't test.** It can't run Melee, because the ISO can't go into CI. CI stops at `--help` and the dependency check. Renders need a Windows PC (section 7).
 - **Practicalities** [reported]:
   - A fork has Actions turned off until they're enabled in its Actions tab.
@@ -175,10 +193,12 @@ A workflow in this repo, `.github/workflows/dolphin-windows.yml`, builds the pac
 
 ## 5. slp2alpha and the tools on Windows
 
+All of these are done (Appendix A). The table keeps what each spot did before the change.
+
 | Where | Today | Change |
 |---|---|---|
 | `runner.py:138–139` | `start_new_session=True`, which is POSIX only; Python ignores it on Windows [reported] | On Windows: `creationflags=subprocess.CREATE_NEW_PROCESS_GROUP` |
-| `runner.py:220–232` (`_stop`) | `os.killpg` with SIGTERM, then SIGKILL. Windows has neither `os.killpg` nor `signal.SIGKILL`, so the first stop raises `AttributeError` and leaves Dolphin running [reported: Python docs] | On Windows: `send_signal(signal.CTRL_BREAK_EVENT)`, wait up to 20 s, then `kill()` (Appendix C) |
+| `runner.py:220–232` (`_stop`) | `os.killpg` with SIGTERM, then SIGKILL. Windows has neither `os.killpg` nor `signal.SIGKILL`, so the first stop raises `AttributeError` and leaves Dolphin running [reported: Python docs] | On Windows: `send_signal(signal.CTRL_BREAK_EVENT)`, wait up to 20 s, then `kill()` (Appendix A) |
 | `locate.py:43–45` | On Windows, only Ishiiruka is looked for | Look for `packages\slippi-playback-mainline\dolphin-emu-nogui.exe` first. `engine_of()` already recognises the name, `.exe` included [verified] |
 | `locate.py:49–50`, `__main__.py:358, 365` | The messages name the Mac build scripts | Name the right script for the platform; on Windows, also the CI zip |
 | `config.py:104` | `GFXBackend` defaults to `Metal` | `D3D` on Windows. The backend names are `D3D` (Direct3D 11), `D3D12`, `Vulkan` and `OGL` [verified] |
@@ -195,7 +215,7 @@ A workflow in this repo, `.github/workflows/dolphin-windows.yml`, builds the pac
 - **No console windows.** When slp2alpha runs in a terminal, Dolphin and ffmpeg share its console, so no window opens. Ctrl+Break also needs that shared console, so run slp2alpha from a terminal, not with `pythonw` [reported].
 - **Reading the recording while it grows.** The streaming solver opens the `.mkv` while Dolphin is writing it. That works only if Dolphin's FFmpeg opens the file without blocking other readers. FFmpeg's file code opens files that way [reported], but it's [to test]. If it fails, `--no-stream` solves after recording instead.
 - **Out of scope:**
-  - `tools/animelee/build-iso.sh` is a bash script, so building the Animelee ISO on Windows needs Git Bash or WSL.
+  - `tools/animelee/build_iso.py` (formerly `build-iso.sh`) needs `xdelta3.exe` on Windows; nothing else.
   - The logo stage's open findings.
 
 ## 6. Running it on Windows
@@ -260,19 +280,17 @@ If Direct3D 11 records nothing without a window, try `D3D12`, then `Vulkan`, bef
 
 ## 9. Effort and order of work
 
-| Step | Effort | Windows PC needed? |
-|---|---|---|
-| W1. Initialize `ok` in 0004, add 0005, update `.gitattributes`; rebuild and re-check on the Mac | 0.25 day | No |
-| W2. `build-windows-mainline.ps1` with the F1 FFmpeg (Appendix A) | 0.5 day | No: CI runs it |
-| W3. The workflow, iterated until the zip builds (about 30 minutes per run) | 0.5–1 day | No |
-| W4. slp2alpha and the tools (section 5) | 0.5 day | Only to test |
-| W5. First renders and the checks (section 7) | 0.5–1 day | Yes |
-| W6. Docs: a Windows section in `camera-export.md` and the README; plan statuses | 0.25 day | No |
-| **Total** | **2.5–3.5 days**, plus CI waits | |
-| F2 instead of F1, if needed | +0.5–1 day | No |
+| Step | Effort | Windows PC needed? | Status |
+|---|---|---|---|
+| W1. Initialize `ok` in 0004, add 0005, update `.gitattributes`; rebuild and re-check on the Mac | 0.25 day | No | Done |
+| W2. `build-windows-mainline.py` with the F1 FFmpeg | 0.5 day | No: CI runs it | Written; not run on Windows |
+| W3. The workflow, iterated until the zip builds (about 30 minutes per run) | 0.5–1 day | No | Written; not run yet |
+| W4. slp2alpha and the tools (section 5) | 0.5 day | Only to test | Done; Windows paths untested |
+| W5. First renders and the checks (section 7) | 0.5–1 day | Yes | [`plan-windows-remaining.md`](plan-windows-remaining.md) |
+| W6. Docs: a Windows section in `camera-export.md` and the README; plan statuses | 0.25 day | No | Pointers done; the Windows section waits for results |
+| F2 instead of F1, if needed | +0.5–1 day | No | Only if F1 fails |
 
-- **W1 to W4** can all be done from the Mac.
-- **W5** needs a Windows PC with a GPU, an NTSC 1.02 ISO, and the test replays. `run.py` downloads the replays into `%LOCALAPPDATA%\AlphaSolveVideo\test-replays` [verified: `run.py:48–49`].
+- **W5** needs a Windows PC with a GPU, an NTSC 1.02 ISO, and the test replays. `run.py` downloads the replays into `%LOCALAPPDATA%\AlphaSolveVideo\test-replays` (`locate.cache_root()`).
 - **What this changes in [`plan-windows.md`](plan-windows.md):**
   - Its Ishiiruka route stays as the no-build option, for plain renders with a window.
   - The background options in its section 5 aren't needed with this build, which never opens a window.
@@ -280,118 +298,18 @@ If Direct3D 11 records nothing without a window, try `D3D12`, then `Vulkan`, bef
 
 ---
 
-## Appendix A: build script sketch
+## Appendix A: where it's implemented
 
-`tools/dolphin-build/build-windows-mainline.ps1 [fetch|configure|build|bundle|all]` is the counterpart of `build-mac-mainline.sh`. The key commands of each step, without the error checks:
+The sketches that were here are now real files:
 
-```powershell
-$Commit  = "c5f635948ed43f4d14a72069343e0cecdc117391"   # fix/mainline-playback, 2026-06-15
-$Repo    = (Resolve-Path "$PSScriptRoot\..\..").Path
-$Cache   = if ($env:ALPHASOLVE_CACHE) { $env:ALPHASOLVE_CACHE } else { "$env:LOCALAPPDATA\AlphaSolveVideo" }
-$Src     = "$Cache\mainline"; $Build = "$Src\build"
-$Patches = "$Repo\tools\dolphin-build\patches-mainline"
-$FFmpeg  = "$Cache\ffmpeg-n8.1-win64-lgpl-shared"         # unzipped after checking its SHA-256
-$Out     = "$Repo\packages\slippi-playback-mainline"
-
-# fetch, and apply the patches
-git init -q $Src
-git -C $Src config core.autocrlf false                    # the patches and Dolphin's sources are LF
-git -C $Src config core.longpaths true
-git -C $Src fetch -q --depth 1 https://github.com/project-slippi/dolphin.git $Commit
-git -C $Src checkout -q FETCH_HEAD
-git -C $Src -c core.autocrlf=false -c submodule.Externals/Qt.update=none `
-    submodule update --init --recursive --depth 1 --jobs 4
-foreach ($p in Get-ChildItem "$Patches\*.patch" | Sort-Object Name) {
-  git -C $Src apply --reverse --check $p.FullName 2>$null
-  if ($LASTEXITCODE -ne 0) { git -C $Src apply $p.FullName }
-}
-
-# configure: the MSVC environment loaded, the venv's CMake 3.31 and Ninja first on the PATH
-$env:FFMPEG_DIR = $FFmpeg                                 # read by CMake/FindFFmpeg.cmake:50
-cmake -S $Src -B $Build -G Ninja ...                      # the switches in section 3.4
-#   then require "libav/ffmpeg found, enabling AVI frame dumps" in the output
-
-# build
-cmake --build $Build --target dolphin-nogui
-
-# bundle
-New-Item -ItemType Directory -Force $Out | Out-Null
-Copy-Item "$Src\Binary\x64\dolphin-emu-nogui.exe" $Out
-Copy-Item "$Build\cargo\build\x86_64-pc-windows-msvc\release\slippi_rust_extensions.dll" $Out
-foreach ($d in "avcodec-62", "avformat-62", "avutil-60", "swresample-6", "swscale-9") {
-  Copy-Item "$FFmpeg\bin\$d.dll" $Out
-}
-Copy-Item -Recurse "$Src\Data\Sys" "$Out\Sys"
-Copy-Item "$Src\Data\PlaybackGeckoCodes\GALE01r2.ini" "$Out\Sys\GameSettings\"
-Remove-Item "$Out\Sys\GameSettings\Replace *.txt"
-Copy-Item "$Src\COPYING" $Out; Copy-Item -Recurse "$Src\LICENSES" "$Out\Licenses"
-if (-not ((& "$Out\dolphin-emu-nogui.exe" --help) -match "--camera-out")) { throw "patch 0004 is missing" }
-dumpbin /dependents "$Out\dolphin-emu-nogui.exe"          # only Windows, the VC++ runtime and the files above
-```
-
-## Appendix B: workflow sketch
-
-```yaml
-name: Windows playback Dolphin
-on:
-  workflow_dispatch:
-  push:
-    paths: ["tools/dolphin-build/**", ".github/workflows/dolphin-windows.yml"]
-jobs:
-  build:
-    runs-on: windows-2022
-    timeout-minutes: 120
-    env:
-      ALPHASOLVE_CACHE: C:\asv
-    steps:
-      - run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
-      - uses: actions/cache@v4
-        with:
-          path: C:\asv\ffmpeg-*
-          key: ffmpeg-${{ hashFiles('tools/dolphin-build/build-windows-mainline.ps1') }}
-      - uses: egor-tensin/vs-shell@v2
-      - run: rustup toolchain install 1.88.0 --profile minimal --component rustfmt
-      - run: ./tools/dolphin-build/build-windows-mainline.ps1 all
-        shell: pwsh
-      - uses: actions/upload-artifact@v4
-        with:
-          name: slippi-playback-mainline-windows
-          path: packages/slippi-playback-mainline
-```
-
-## Appendix C: stopping Dolphin, in `runner.py`
-
-```python
-_OWN_GROUP = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
-              else {"start_new_session": True})
-
-proc = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                        env=env, **_OWN_GROUP)
-
-
-def _stop(proc: subprocess.Popen, term_wait: float = 20.0) -> Optional[int]:
-    if proc.poll() is not None:
-        return proc.returncode
-    if os.name == "nt":
-        # Ctrl+Break: NoGUI's clean shutdown on Windows (patch 0005), as SIGTERM is elsewhere
-        steps = ((lambda: proc.send_signal(signal.CTRL_BREAK_EVENT), term_wait), (proc.kill, 5.0))
-    else:
-        steps = ((lambda: os.killpg(proc.pid, signal.SIGTERM), term_wait),
-                 (lambda: os.killpg(proc.pid, signal.SIGKILL), 5.0))
-    for send, wait in steps:
-        try:
-            send()
-        except ProcessLookupError:
-            break
-        except OSError:
-            continue  # e.g. no shared console for Ctrl+Break: go on to the hard stop
-        try:
-            return proc.wait(timeout=wait)
-        except subprocess.TimeoutExpired:
-            continue
-    return proc.poll()
-```
+| Plan | File |
+|---|---|
+| The build (sections 3.1 to 3.5) | `tools/dolphin-build/build-windows-mainline.py` (`fetch`, `configure`, `build`, `bundle`, `all`) |
+| Patch changes (section 3.6) | `tools/dolphin-build/patches-mainline/0004-camera-export.patch`, `0005-nogui-windows-ctrl-break.patch` |
+| Line endings (section 3.2) | `.gitattributes` (`*.patch` and `*.sh` LF, `*.bat` CRLF) |
+| GitHub Actions (section 4) | `.github/workflows/dolphin-windows.yml` |
+| Stopping Dolphin (section 3.6, section 5) | `tools/slp2alpha/slp2alpha/runner.py`: `_own_process_group`, `_ask_to_quit`, `_close_windows`, `_stop` |
+| The other slp2alpha and tool changes (section 5) | `locate.py` (`cache_root`, `mainline_package`, `build_hint`, `utf8_child_env`), `config.py` (`default_video_backend`), `solve.py` (`missing_encoder`), `__main__.py`, `tools/render-tests/run.py`, `tools/camera-export/validate_camera.py`, `tools/logo-stage/` |
 
 ## References
 
