@@ -532,7 +532,10 @@ def cmd_blender(args) -> int:
             if p == list(cams[k].interest):
                 worst_center = max(worst_center, math.hypot(got[0] - size[0] / 2, got[1] - size[1] / 2))
         sc = result["scene"]
-        want_aspect = (float(doc["projection"]["aspect"]) * size[1] / size[0], 1.0)
+        # Blender's pixel aspects are 1 or more: a picture whose pixels are narrower than tall (a raw 640 x 480
+        # recording) has its aspect on y (import_melee_camera.pixel_aspect)
+        wide = float(doc["projection"]["aspect"]) * size[1] / size[0]
+        want_aspect = (wide, 1.0) if wide >= 1.0 else (1.0, 1.0 / wide)
         print(f"{label}: {len(probes)} probes on {len(set(k for k, _ in probes))} frames: Blender within "
               f"{worst:.5f} px of the model, the look-at point within {worst_center:.6f} px of the centre")
         if worst > BLENDER_TOLERANCE_PX:

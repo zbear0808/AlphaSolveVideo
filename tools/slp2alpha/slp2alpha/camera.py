@@ -236,7 +236,7 @@ def _sample(row: Row, near_far: Tuple[float, float]) -> dict:
 
 def write_export(path: Path, samples: Sequence[Row], *, replay: Path, stage_id: int, stage_name: str,
                  width: int, height: int, scale: int, fps: str, video_frames: int, replay_last: int,
-                 transparent: Path, alpha_map: Path, iso: str, codes: Sequence[str]) -> Path:
+                 transparent: Path, alpha_map: Optional[Path], iso: str, codes: Sequence[str]) -> Path:
     p = samples[0].plain
     doc = {
         "format": FORMAT,
@@ -244,7 +244,7 @@ def write_export(path: Path, samples: Sequence[Row], *, replay: Path, stage_id: 
         "replay": Path(replay).name,
         "stage": {"id": stage_id, "name": stage_name},
         "render": {"width": width, "height": height, "scale": scale, "fps": fps,
-                   "transparent": Path(transparent).name, "alpha_map": Path(alpha_map).name,
+                   "transparent": Path(transparent).name, "alpha_map": Path(alpha_map).name if alpha_map else None,
                    "iso": iso, "codes": list(codes)},
         "projection": {"type": "perspective", "fov_axis": "vertical", "aspect": p["aspect"],
                        "viewport": [p["vp_x0"], p["vp_x1"], p["vp_y0"], p["vp_y1"]],
@@ -277,11 +277,12 @@ def export_path(out_dir: Path, name: str) -> Path:
 
 
 def build(csv_path: Path, out: Path, *, first: int, video_frames: int, replay_last: int, stage_id: int,
-          static_camera: bool, **meta) -> Tuple[Optional[Path], List[str]]:
-    """Read Dolphin's rows, check them and write the export. Returns (the file or None, problems)."""
+          static_camera: bool, last_frame: Optional[int] = None, **meta) -> Tuple[Optional[Path], List[str]]:
+    """Read Dolphin's rows, check them and write the export. Returns (the file or None, problems).
+    last_frame: rows after it aren't the video's (render records one frame more than it keeps)."""
     if not Path(csv_path).exists():
         return None, ["Dolphin wrote no camera file"]
-    rows = read_csv(csv_path)
+    rows = [r for r in read_csv(csv_path) if last_frame is None or r.frame <= last_frame]
     samples, problems = align(rows, first, video_frames, replay_last)
     if not samples:
         return None, problems + ["no camera rows for the video's frames"]

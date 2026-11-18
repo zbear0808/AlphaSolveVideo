@@ -110,7 +110,7 @@ def default_video_backend() -> Optional[str]:
 
 
 def _mainline_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: Optional[bool],
-                   video_backend: Optional[str], custom_textures: bool = False
+                   video_backend: Optional[str], custom_textures: bool = False, raw_resolution: bool = False
                    ) -> Tuple[OrderedDict, OrderedDict, List[str]]:
     core = OrderedDict()
     backend = video_backend or default_video_backend()
@@ -136,7 +136,9 @@ def _mainline_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: O
         ("Settings", OrderedDict([
             ("InternalResolution", str(scale)),
             ("AspectRatio", str(MAINLINE_ASPECT_AUTO)),
-            ("FrameDumpsResolutionType", str(MAINLINE_DUMP_XFB_ASPECT_CORRECTED)),
+            # Raw: the XFB as the console sends it to the TV, 640x480 per scale step, one row per scanline.
+            ("FrameDumpsResolutionType", str(MAINLINE_DUMP_XFB_RAW if raw_resolution
+                                             else MAINLINE_DUMP_XFB_ASPECT_CORRECTED)),
             ("DumpFormat", "mkv"),   # FFV1 in Matroska; readable while it is still being written
             ("DumpCodec", "ffv1"),
             ("ShowFPS", "False"),
@@ -163,21 +165,25 @@ def write_user_dir(
     engine: str = ISHIIRUKA,
     cpu_thread: Optional[bool] = None,
     custom_textures: Optional[Dict[str, bytes]] = None,
+    raw_resolution: bool = False,
 ) -> None:
     """Write Config/Dolphin.ini, Config/GFX.ini and GameSettings/GALE01.ini under user_dir.
 
     cpu_thread overrides the playback codes' "CPUThread = False" (single core) for this game.
     custom_textures: PNG data by Dolphin's name for the texture it replaces (mainline build only).
+    raw_resolution: record the XFB unstretched, 640x480 per scale step instead of 640x528 (mainline build only).
     """
     if custom_textures and engine != MAINLINE:
         raise ValueError("custom textures need the mainline build: the Ishiiruka build names textures differently")
+    if raw_resolution and engine != MAINLINE:
+        raise ValueError("raw-resolution recordings need the mainline build")
     user_dir = Path(user_dir)
     (user_dir / "Config").mkdir(parents=True, exist_ok=True)
     (user_dir / "GameSettings").mkdir(parents=True, exist_ok=True)
 
     if engine == MAINLINE:
         dolphin, gfx, log_names = _mainline_inis(scale, record, cpu_core, fastmem, video_backend,
-                                                 bool(custom_textures))
+                                                 bool(custom_textures), raw_resolution)
     else:
         dolphin, gfx, log_names = _ishiiruka_inis(scale, record, cpu_core, fastmem, video_backend)
     (user_dir / "Config" / "Dolphin.ini").write_text(_ini(dolphin), encoding="utf-8")

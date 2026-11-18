@@ -65,7 +65,8 @@ _PAD_EVEN = "pad=ceil(iw/2)*2:ceil(ih/2)*2"
 @dataclass
 class SolveOutputs:
     transparent: Path
-    alpha_map: Path
+    alpha_map: Optional[Path]
+    """None for a recording without the flicker (render --keep-background): there is no alpha to map."""
 
 
 def filter_graph(first_color: str, offset: int, fmt: OutputFormat, rate: str = DEFAULT_FIELD_RATE) -> str:
@@ -119,6 +120,46 @@ def output_paths(out_dir: Path, name: str, fmt_name: str) -> SolveOutputs:
     fmt = FORMATS[fmt_name]
     return SolveOutputs(Path(out_dir) / f"fullTransparent - {name}{fmt.suffix}",
                         Path(out_dir) / f"alphaMap - {name}{fmt.suffix}")
+
+
+# Recordings without the flicker (render --keep-background): the game as it looks, no alpha to solve. The same
+# formats, without an alpha channel; full chroma where the codec allows it.
+OPAQUE_PREFIX = "fullOpaque - "
+OPAQUE_ARGS: Dict[str, List[str]] = {
+    "mov": ["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuv444p10le", "-vendor", "apl0"],
+    "hevc": ["-c:v", "hevc_videotoolbox", "-q:v", "80", "-tag:v", "hvc1"],
+    "mkv": ["-c:v", "ffv1", "-pix_fmt", "bgr0"],
+    "png": ["-f", "apng", "-plays", "0"],
+    "webm": ["-c:v", "libvpx-vp9", "-lossless", "1", "-pix_fmt", "yuv444p"],
+    "gif": ["-r", "50"],
+}
+
+
+def opaque_path(out_dir: Path, name: str, fmt_name: str) -> Path:
+    return Path(out_dir) / f"{OPAQUE_PREFIX}{name}{FORMATS[fmt_name].suffix}"
+
+
+def encode_opaque(ffmpeg: str, video: str, out_dir: Path, name: str, fmt: str = DEFAULT_FORMAT,
+                  frames: Optional[int] = None, rate: str = DEFAULT_FIELD_RATE,
+                  output_rate: Optional[str] = None) -> Path:
+    """Encode a recording made without the flicker: one recorded field per game frame, so nothing is paired
+    or solved. Only the first `frames` count (Melee keeps drawing after the replay's end until Dolphin stops)."""
+    if fmt not in FORMATS:
+        raise ValueError(f"unknown format {fmt!r}; choose from {', '.join(FORMATS)}")
+    Path(out_dir).mkdir(parents=True, exist_ok=True)
+    out = opaque_path(out_dir, name, fmt)
+    num, _, den = (output_rate or rate).partition("/")
+    # trimmed before any resampling: a GIF's -r 50 would otherwise stretch -frames:v past the clip's end
+    graph = (f"[0:v]trim=end_frame={frames}," if frames else "[0:v]") + f"settb={den or 1}/{num},setpts=N"
+    if FORMATS[fmt].even_size:
+        graph += f",{_PAD_EVEN}"
+    if FORMATS[fmt].gif:
+        graph += ",split[g1][g2];[g1]palettegen[pal];[g2][pal]paletteuse=dither=none"
+    graph += "[out]"
+    cmd = [ffmpeg, "-nostdin", "-y", "-v", "error", "-i", video, "-filter_complex", graph, "-map", "[out]"]
+    cmd += ["-r", output_rate] if output_rate and not FORMATS[fmt].gif else []
+    subprocess.run(cmd + OPAQUE_ARGS[fmt] + [str(out)], check=True)
+    return out
 
 
 @lru_cache(maxsize=None)

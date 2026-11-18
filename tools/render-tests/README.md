@@ -41,6 +41,8 @@ The replays were picked to cover:
 - Pokémon Stadium with and without transformations (console tournament setups freeze it);
 - a 12-second quit-out, rendered in every output format;
 - clips: a slice from the middle of a match, one that starts 8,500 frames in (Dolphin fast-forwards to it), and one that runs to the replay's last frame (`--start-frame`, `--end-frame`);
-- camera exports (`--export-camera`): a whole match with the stage drawn, a clip that Dolphin skips ahead to, the fixed camera, and the quit-out.
+- camera exports (`--export-camera`): a whole match with the stage drawn, a clip that Dolphin skips ahead to, the fixed camera, and the quit-out;
+- the game as it looks (`--keep-background`): the quit-out, a Final Destination clip and Yoshi's Story with the Shy Guy sprite. These are opaque, recorded without the flicker, so the transparency and pairing checks don't apply; the frame count does;
+- unstretched recordings (`--raw-resolution`, 640x480): a characters-only clip and the quit-out with the camera export.
 
 Adding a replay means adding an entry with its Slippi Lab file name (shown in the address bar or in `https://slippilab.com/api/replays`).

@@ -42,6 +42,17 @@ def picture_size(scale: float = 1.0, size: Optional[Size] = None) -> Size:
     return (float(size[0]), float(size[1])) if size is not None else (OUT_WIDTH * scale, OUT_HEIGHT * scale)
 
 
+# What Dolphin records per --scale: the XFB stretched to the TV's shape (its height rounded up to a multiple of 4),
+# or with `render --raw-resolution` the XFB itself, 640 x 480 per step.
+RECORDING_SIZES = {1: (640, 528), 2: (1280, 1056), 3: (1920, 1580), 4: (2560, 2108)}
+
+
+def recording_size(scale: int = 1, raw: bool = False) -> Tuple[int, int]:
+    if raw:
+        return XFB_WIDTH * scale, XFB_HEIGHT * scale
+    return RECORDING_SIZES.get(scale, (OUT_WIDTH * scale, OUT_HEIGHT * scale))
+
+
 def _dot(a: Sequence[float], b: Sequence[float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 

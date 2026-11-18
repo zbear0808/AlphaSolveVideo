@@ -159,16 +159,33 @@ def _recordings(dump: Path) -> List[Path]:
 STREAM_LEAD_FRAMES = validate.PAIRING_PAIRS + 30
 
 
+def _plain_problems(ffprobe: str, video: str, probe: validate.Probe, expected: int) -> List[str]:
+    """The checks for a recording without the flicker (--keep-background): one field per game frame."""
+    out = []
+    if probe.codec != "ffv1":
+        out.append(f"recording codec is {probe.codec}, expected lossless ffv1")
+    if probe.frames < expected - 4:
+        out.append(f"recording has {probe.frames} frames, expected {expected}")
+    gaps = [g for g in validate.timestamp_gaps(ffprobe, video, probe.rate) if g[0] < expected]
+    if gaps:
+        missing = sum(n for _, n in gaps)
+        out.append(f"Dolphin skipped {missing} field(s) in {len(gaps)} place(s) (first at frame {gaps[0][0]}); "
+                   "the game lagged there, so the video is that many frames short")
+    return out
+
+
 def _render_codes(args, stage_id: int, sprite: bool = False) -> List[str]:
-    """Gecko codes to enable for one render. sprite: the Shy Guys are drawn (with the --shy-guy-sprite image)."""
-    enabled = list(config.FLICKER_CODES)
+    """Gecko codes to enable for one render. sprite: the Shy Guys are drawn (with the --shy-guy-sprite image).
+    With --keep-background the game is recorded as it looks: no flicker, and nothing of the stage is removed. The
+    input timing code stays: without it the game now and then slips a field, and a recorded frame is lost."""
+    enabled = [config.INPUT_TIMING_CODE] if args.keep_background else list(config.FLICKER_CODES)
     if args.characters_only:
         enabled += [c for c in config.HIDE_STAGE_CODES if not (sprite and c == config.HIDE_SHY_GUYS_CODE)]
         if args.hide_items:
             enabled.append(config.HIDE_ITEMS_CODE)
         if args.hide_effects:
             enabled.append(config.HIDE_EFFECTS_CODE)
-    else:
+    elif not args.keep_background:
         enabled += stages.BACKGROUND_CODES[stage_id]
     if args.static_camera:
         enabled += config.STATIC_CAMERA_CODES
@@ -196,10 +213,10 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
         if replay.stage_id not in stages.CHARACTERS_ONLY_TESTED:
             print(f"{replay_path.name}: note: {stage} hasn't been checked in characters-only mode; "
                   "items or enemies the stage spawns would still show", file=sys.stderr)
-    elif not stages.is_supported(replay.stage_id):
+    elif not args.keep_background and not stages.is_supported(replay.stage_id):
         print(f"{replay_path.name}: skipped, {stage} has no background-removal codes "
               f"(supported: {', '.join(stages.supported_stage_names())}; "
-              "--characters-only works on every stage)", file=sys.stderr)
+              "--characters-only and --keep-background work on every stage)", file=sys.stderr)
         return False
 
     if sprite and replay.stage_id != shyguy.STAGE_ID:
@@ -210,9 +227,11 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else replay_path.resolve().parent
     variant = [label for on, label in ((is_clip, f"frames {first} to {last}"),
                                        (args.characters_only, "characters only"),
+                                       (args.keep_background, "with background"),
                                        (args.static_camera, "static camera"),
                                        (args.animelee, "animelee"),
                                        (sprite, "shy guy sprite"),
+                                       (args.raw_resolution, "raw resolution"),
                                        # labelled 60 fps: kept apart from a 59.94 render of the same replay
                                        (args.export_camera, "60 fps")) if on]
     name = replay_path.stem + (f" ({', '.join(variant)})" if variant else "")
@@ -222,12 +241,14 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     enabled = _render_codes(args, replay.stage_id, sprite is not None)
     config.write_user_dir(user, codes, enabled=enabled, scale=args.scale, engine=engine,
                           cpu_thread=args.dual_core, debug_logging=args.debug, video_backend=args.backend,
-                          custom_textures=sprite.textures if sprite else None)
+                          custom_textures=sprite.textures if sprite else None, raw_resolution=args.raw_resolution)
     comm = work / "comm.json"
     # Dolphin records strictly between startFrame and endFrame, so these give frames first..last.
     # A startFrame above the game's first frame makes it fast-forward there (not recorded).
+    # The picture of the last frame can be presented after the playback counter has moved one past it, so
+    # Dolphin records one frame more than asked for: anything recorded after `last` is dropped below.
     start_frame = first - 1
-    config.write_comm(comm, replay_path, start_frame=start_frame, end_frame=last + 1)
+    config.write_comm(comm, replay_path, start_frame=start_frame, end_frame=last + 2)
     clip_frames = last - first + 1
     skip_frames = max(0, start_frame - slp.FIRST_FRAME)
     boot_timeout = args.boot_timeout + skip_frames / MIN_SKIP_FPS
@@ -264,11 +285,13 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
 
     # The flicker code draws every game frame twice. Melee keeps drawing after the last replay frame
     # (e.g. the pause screen after an LRAS quit) until Dolphin is stopped, so only this many pairs count.
+    # Without the flicker (--keep-background) each game frame is one recorded field, and as many count.
     expected_pairs = clip_frames
 
     # The native build records Matroska, which can be read while it is written: solve alongside Dolphin.
-    # A clip shorter than the lead is solved once Dolphin has finished.
-    stream = engine == config.MAINLINE and args.stream
+    # A clip shorter than the lead is solved once Dolphin has finished. A recording without the flicker has
+    # nothing to solve; it is encoded once Dolphin has finished.
+    stream = engine == config.MAINLINE and args.stream and not args.keep_background
     outputs = None
     if stream:
         while not dolphin_done.is_set():
@@ -299,36 +322,51 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
               file=sys.stderr)
     video = str(dumps[0])
 
-    report = validate.quick_check(ffmpeg, ffprobe, video, expected_pairs)
-    for problem in report.problems(expected_frames=2 * expected_pairs):
-        print(f"  warning: {problem}", file=sys.stderr)
-    pairs = min(expected_pairs, solve.pair_count(report.probe.frames, report.pairing.offset))
-    if outputs is None:
-        outputs = solve.solve(ffmpeg, video, out_dir, name, report.pairing.first_color, report.pairing.offset,
-                              fmt=args.format, pairs=pairs, show_progress=False, rate=report.probe.rate,
-                              output_rate=output_rate)
-    elif (report.pairing.first_color, report.pairing.offset) != (pairing.first_color, pairing.offset):
-        print(f"  warning: pairing from the first frames ({pairing.first_color}/{pairing.offset}) differs from "
-              f"the full recording's ({report.pairing.first_color}/{report.pairing.offset})", file=sys.stderr)
+    if args.keep_background:
+        probe = validate.probe(ffprobe, video)
+        for problem in _plain_problems(ffprobe, video, probe, expected_pairs):
+            print(f"  warning: {problem}", file=sys.stderr)
+        pairs = min(expected_pairs, probe.frames)
+        opaque = solve.encode_opaque(ffmpeg, video, out_dir, name, fmt=args.format, frames=pairs, rate=probe.rate,
+                                     output_rate=output_rate)
+        outputs = solve.SolveOutputs(opaque, None)
+    else:
+        report = validate.quick_check(ffmpeg, ffprobe, video, expected_pairs)
+        for problem in report.problems(expected_frames=2 * expected_pairs):
+            print(f"  warning: {problem}", file=sys.stderr)
+        probe = report.probe
+        pairs = min(expected_pairs, solve.pair_count(report.probe.frames, report.pairing.offset))
+        if outputs is None:
+            outputs = solve.solve(ffmpeg, video, out_dir, name, report.pairing.first_color, report.pairing.offset,
+                                  fmt=args.format, pairs=pairs, show_progress=False, rate=report.probe.rate,
+                                  output_rate=output_rate)
+        elif (report.pairing.first_color, report.pairing.offset) != (pairing.first_color, pairing.offset):
+            print(f"  warning: pairing from the first frames ({pairing.first_color}/{pairing.offset}) differs from "
+                  f"the full recording's ({report.pairing.first_color}/{report.pairing.offset})", file=sys.stderr)
     camera_json = None
     if camera_csv:
+        # A whole render without the flicker ends one frame short: the game's last picture comes after Slippi's
+        # playback has ended, when Dolphin no longer records. Its camera row then has no video frame.
+        shown_last = camera.first_shown(first) + pairs - 1
         camera_json, problems = camera.build(
             camera_csv, camera.export_path(out_dir, name), first=first, video_frames=pairs,
             replay_last=replay.last_frame, stage_id=replay.stage_id, static_camera=args.static_camera,
-            replay=replay_path, stage_name=stage, width=report.probe.width, height=report.probe.height,
+            replay=replay_path, stage_name=stage, width=probe.width, height=probe.height,
             scale=args.scale, fps=camera.OUTPUT_RATE, transparent=outputs.transparent, alpha_map=outputs.alpha_map,
-            iso="animelee" if args.animelee else "vanilla", codes=enabled)
+            iso="animelee" if args.animelee else "vanilla", codes=enabled,
+            last_frame=min(last, shown_last) if args.keep_background else last)
         for problem in problems:
             print(f"  warning: camera: {problem}", file=sys.stderr)
     t_done = time.monotonic()
     game_seconds = clip_frames / 60
     timing = (f"Dolphin and solver together {t_rendered - t_start:.0f} s, then checks {t_done - t_rendered:.0f} s"
-              if stream else f"Dolphin {t_rendered - t_start:.0f} s, solve {t_done - t_rendered:.0f} s")
+              if stream else f"Dolphin {t_rendered - t_start:.0f} s, "
+                             f"{'encode' if args.keep_background else 'solve'} {t_done - t_rendered:.0f} s")
     print(f"  done in {t_done - t_start:.0f} s ({timing}) for {game_seconds:.0f} s of gameplay: "
           f"{game_seconds / (t_done - t_start):.2f}x real time")
-    print(f"  {outputs.transparent}\n  {outputs.alpha_map}")
-    if camera_json:
-        print(f"  {camera_json}")
+    for path in (outputs.transparent, outputs.alpha_map, camera_json):
+        if path:
+            print(f"  {path}")
     if args.keep:
         print(f"  work folder kept: {work}")
     else:
@@ -342,9 +380,16 @@ def cmd_render(args) -> int:
         print("error: --start-frame and --end-frame pick frames of one replay; "
               f"{len(args.replays)} replays were given", file=sys.stderr)
         return 2
+    if args.keep_background:
+        clash = [opt for on, opt in ((args.characters_only, "--characters-only"), (args.hide_items, "--hide-items"),
+                                     (args.hide_effects, "--hide-effects")) if on]
+        if clash:
+            print(f"error: --keep-background draws the whole stage; it can't be combined with {', '.join(clash)}",
+                  file=sys.stderr)
+            return 2
     if args.shy_guy_sprite:
-        problem = ("it needs --characters-only (Yoshi's Story can't be rendered with its stage showing)"
-                   if not args.characters_only else
+        problem = ("it needs --characters-only or --keep-background (Yoshi's Story's background can't be removed "
+                   "with its stage showing)" if not (args.characters_only or args.keep_background) else
                    "Shy Guys are items, which --hide-items hides" if args.hide_items else None)
         if problem:
             print(f"error: --shy-guy-sprite can't be used like this: {problem}", file=sys.stderr)
@@ -353,6 +398,9 @@ def cmd_render(args) -> int:
     engine = runner.engine_of(dolphin)
     if args.shy_guy_sprite and engine != config.MAINLINE:
         print("error: --shy-guy-sprite needs the headless mainline build", file=sys.stderr)
+        return 2
+    if args.raw_resolution and engine != config.MAINLINE:
+        print("error: --raw-resolution needs the headless mainline build", file=sys.stderr)
         return 2
     if args.export_camera:
         problem = ("it needs the headless mainline build" if engine != config.MAINLINE else
@@ -410,8 +458,15 @@ def main(argv=None) -> int:
     pr.add_argument("--out-dir", help="output folder (default: next to each replay)")
     pr.add_argument("--scale", type=int, default=1, choices=sorted(config.EFB_SCALE_FOR),
                     help="internal resolution multiplier (1 = 640x528)")
+    pr.add_argument("--raw-resolution", action="store_true",
+                    help="record the console's picture unstretched: 640x480 per --scale step, one row per scanline "
+                         "it sends to the TV, instead of Dolphin's TV-shaped 640x528 (for CRT effects; mainline "
+                         "build only)")
     pr.add_argument("--characters-only", action="store_true",
                     help="don't draw the stage at all (works on every stage); also hides the HUD unless --hud")
+    pr.add_argument("--keep-background", action="store_true",
+                    help="record the game as it looks, stage background and all, without the flicker: one opaque "
+                         "video (fullOpaque - NAME), no transparency and no alpha map; works on every stage")
     pr.add_argument("--hud", action=argparse.BooleanOptionalAction, default=None,
                     help="draw percents, stocks, timer and other overlays "
                          "(default: on, off with --characters-only)")
@@ -423,9 +478,10 @@ def main(argv=None) -> int:
                     help="keep the camera still: Melee's fixed camera, which shows the whole stage, without "
                          "screen shake (fighters look smaller; consider --scale 2)")
     pr.add_argument("--shy-guy-sprite", metavar="IMAGE",
-                    help="Yoshi's Story, with --characters-only: draw the Shy Guys with this image instead of "
-                         "the game's art (PNG with transparency works best). It is fitted inside the Shy Guy's "
-                         "square and moves with it, mirrored when it faces left (docs/shy-guy-sprite.md)")
+                    help="Yoshi's Story, with --characters-only or --keep-background: draw the Shy Guys with this "
+                         "image instead of the game's art (PNG with transparency works best). It is fitted inside "
+                         "the Shy Guy's square and moves with it, mirrored when it faces left "
+                         "(docs/shy-guy-sprite.md)")
     pr.add_argument("--export-camera", action="store_true",
                     help="also write 'camera - NAME.json': Melee's camera on every frame of the video (eye, look-at "
                          "point, field of view, shake), for Blender (tools/camera-export). The videos are then "

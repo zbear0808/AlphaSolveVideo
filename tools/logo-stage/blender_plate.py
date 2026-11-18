@@ -10,9 +10,18 @@ projection does not change under a uniform scale, so the picture is what a logo 
     Melee (X right, Y up, Z to the camera)  ->  Blender (X right, Y away from the camera, Z up)
     Blender point = (cx + (X - xc) / s,   y0 - Z / s,   zg + (Y - ground_y) / s)
 
-Job keys: out (png), camera {eye, fov, vert, horz, aspect}, scale (output size multiplier, 640x528 at 1), style
-(metal | cel), fit {width, center_x, to: bbox | letters}, ground {y, line: xheight | top, offset}, depth_shift,
-outline_px, samples, frame, project_dir.
+Any other model works the same way (job key `model`): a .blend that Blender opened, or a file imported into an
+empty scene (glTF, FBX, OBJ, STL, PLY, USD, Alembic). Its separate objects are fitted as one, and it gets a light
+rig of its own if it brings no lights.
+
+With a camera export (job key `camera_export`, `slp2alpha render --export-camera`) the camera moves as the game's
+did, and every frame is rendered into the folder `out` (000001.png for the video's first frame).
+
+Job keys: out (png, or a folder with camera_export), camera {eye, fov, vert, horz, aspect, interest}, scale (output
+size multiplier, 640x528 at 1), size ([width, height] of the recording, default 640x528 per scale step), style
+(metal | cel | original), fit {width, center_x, to: bbox | letters, scale}, ground {y, line: xheight | top, offset},
+depth_shift, outline_px, samples, frame, model {path, objects, rotation}, camera_export, frames ([first, last]
+Blender frames of a camera export to render).
 """
 
 import json
@@ -28,9 +37,23 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import projection  # noqa: E402
 
+CAMERA_EXPORT_DIR = os.path.join(os.path.dirname(HERE), "camera-export")
 LOGO = "SM_Logo_Hero"
 # How far above the logo the project's front shot (CAM_SH020_Still_Front) looks at it: 0.2 m up at 4.45 m.
 REFERENCE_ELEVATION_DEG = 2.57
+# Object types whose evaluated geometry is a mesh, so they can be measured and drawn in the cel finish.
+GEOMETRY = {"MESH", "CURVE", "SURFACE", "FONT", "META"}
+# Importers by file extension: (operator module, operator name).
+IMPORTERS = {
+    ".glb": ("import_scene", "gltf"), ".gltf": ("import_scene", "gltf"),
+    ".fbx": ("import_scene", "fbx"),
+    ".obj": ("wm", "obj_import"),
+    ".stl": ("wm", "stl_import"),
+    ".ply": ("wm", "ply_import"),
+    ".usd": ("wm", "usd_import"), ".usda": ("wm", "usd_import"), ".usdc": ("wm", "usd_import"),
+    ".usdz": ("wm", "usd_import"),
+    ".abc": ("wm", "alembic_import"),
+}
 
 # The cel finish of the kitty_logo_crash project (klc_cel.py), without the cracks: flat colour bands from a hard
 # ramp on 0.45 N.L + 0.55 (where the view ray reflects), a hard specular glint, a chrome horizon, a flat diagonal gleam.
@@ -98,6 +121,155 @@ def logo_frame(ob, fit_to, ground_line):
                 y0=min(i[4] for i in isl), y1=max(i[5] for i in isl), islands=len(isl))
 
 
+# ---------------------------------------------------------------- any other model
+def drawn_objects():
+    """The scene's objects with geometry that a render draws: in the view layer, not hidden from renders."""
+    return [ob for ob in bpy.context.view_layer.objects
+            if ob.type in GEOMETRY and not ob.hide_render and not any(c.hide_render for c in ob.users_collection)]
+
+
+def load_model(sc, model):
+    """The model's objects: the ones the job names, or every one with geometry that renders. Blender has opened a
+    .blend already; any other file is imported into the startup scene, emptied first (its cube, light and camera)."""
+    path = Path(model["path"])
+    ext = path.suffix.lower()
+    if ext != ".blend":
+        if ext not in IMPORTERS:
+            raise ValueError(f"can't import {path.name}: supported are .blend, {', '.join(sorted(IMPORTERS))}")
+        for ob in list(sc.objects):
+            bpy.data.objects.remove(ob, do_unlink=True)
+        module, name = IMPORTERS[ext]
+        before = set(bpy.data.objects)
+        getattr(getattr(bpy.ops, module), name)(filepath=str(path))
+        for ob in [o for o in bpy.data.objects if o not in before and o.type == "CAMERA"]:
+            bpy.data.objects.remove(ob, do_unlink=True)   # the stage's camera is the only one
+    drawn = drawn_objects()
+    names = model.get("objects")
+    if names:
+        missing = [n for n in names if n not in sc.objects]
+        if missing:
+            have = ", ".join(sorted(o.name for o in drawn)[:20])
+            raise ValueError(f"{path.name} has no object named {', '.join(missing)} (it has: {have})")
+        objects = [sc.objects[n] for n in names]
+        for ob in drawn:
+            if ob not in objects:
+                ob.hide_render = True
+    else:
+        objects = drawn
+    if not objects:
+        raise ValueError(f"{path.name} has nothing to draw (no mesh, curve or text object that renders)")
+    return objects
+
+
+def turn(objects, degrees):
+    """Turn the model (its hierarchies' roots, so rigs and children follow) about the world's origin: `degrees`
+    is the angle about the vertical, or [x, y, z] Euler angles (XYZ, degrees)."""
+    from mathutils import Euler
+    x, y, z = (0.0, 0.0, float(degrees)) if isinstance(degrees, (int, float)) else (float(d) for d in degrees)
+    r = Euler((math.radians(x), math.radians(y), math.radians(z)), "XYZ").to_matrix().to_4x4()
+    roots = set()
+    for ob in objects:
+        while ob.parent is not None:
+            ob = ob.parent
+        roots.add(ob)
+    for ob in roots:
+        ob.matrix_world = r @ ob.matrix_world
+    bpy.context.view_layer.update()
+
+
+def island_tops(me, z):
+    """The highest z of each separate piece (connected vertices) of a mesh."""
+    import numpy as np
+    n = len(me.vertices)
+    edges = np.empty(2 * len(me.edges), dtype=np.int32)
+    me.edges.foreach_get("vertices", edges)
+    a, b = edges[0::2], edges[1::2]
+    label = np.arange(n)
+    while True:   # each vertex takes the smallest label it touches, then jumps along the labels
+        low = np.minimum(label[a], label[b])
+        new = label.copy()
+        np.minimum.at(new, a, low)
+        np.minimum.at(new, b, low)
+        new = new[new]
+        if np.array_equal(new, label):
+            break
+        label = new
+    tops = np.full(n, -np.inf)
+    np.maximum.at(tops, label, z)
+    return [float(t) for t in tops[np.unique(label)]]
+
+
+def model_frame(objects, ground_line):
+    """logo_frame for any objects, fitted as one: their bounding box in Blender units, and the ground line at the
+    highest point (top) or at the median of the tops of the separate pieces (xheight: a logo's lowercase letters)."""
+    import numpy as np
+    dg = bpy.context.evaluated_depsgraph_get()
+    lows, highs, tops = [], [], []
+    for ob in objects:
+        ev = ob.evaluated_get(dg)
+        me = ev.to_mesh()
+        try:
+            n = len(me.vertices)
+            if not n:
+                continue
+            co = np.empty(3 * n, dtype=np.float32)
+            me.vertices.foreach_get("co", co)
+            m = np.array(ev.matrix_world, dtype=np.float64)
+            world = co.reshape(-1, 3).astype(np.float64) @ m[:3, :3].T + m[:3, 3]
+            lows.append(world.min(axis=0))
+            highs.append(world.max(axis=0))
+            if ground_line == "xheight":
+                tops += island_tops(me, world[:, 2])
+        finally:
+            ev.to_mesh_clear()
+    if not lows:
+        raise ValueError("the model has no vertices")
+    lo, hi = np.min(lows, axis=0), np.max(highs, axis=0)
+    if hi[0] - lo[0] <= 0:
+        raise ValueError("the model has no width")
+    ground = median(tops) if ground_line == "xheight" and tops else float(hi[2])
+    return dict(x0=float(lo[0]), x1=float(hi[0]), ground=ground, top=float(hi[2]), bottom=float(lo[2]),
+                y0=float(lo[1]), y1=float(hi[1]), islands=len(tops) or len(lows))
+
+
+def as_mesh(ob):
+    """A mesh object drawing what `ob` draws (a curve or text becomes a mesh, hidden original), for the cel finish."""
+    if ob.type == "MESH":
+        return ob
+    dg = bpy.context.evaluated_depsgraph_get()
+    mesh = bpy.data.meshes.new_from_object(ob.evaluated_get(dg))
+    new = bpy.data.objects.new(f"{ob.name}_mesh", mesh)
+    new.matrix_world = ob.matrix_world.copy()
+    for col in ob.users_collection:
+        col.objects.link(new)
+    ob.hide_render = True
+    return new
+
+
+def add_light_rig(sc, eye, target):
+    """Lights for a model that brings none: a key from the camera's upper left, a softer fill from the right, a rim
+    from behind, and a dim grey world so that what the key doesn't reach isn't black."""
+    fwd = (target - eye).normalized()
+    up = Vector((0.0, 0.0, 1.0))
+    right = fwd.cross(up).normalized()
+    up = right.cross(fwd).normalized()
+    for name, travels, energy, angle in (("LGT_Key", fwd + 0.6 * right - 0.8 * up, 3.0, 4.0),
+                                         ("LGT_Fill", fwd - 0.9 * right - 0.2 * up, 1.0, 15.0),
+                                         ("LGT_Rim", -fwd + 0.3 * right - 0.9 * up, 2.5, 4.0)):
+        data = bpy.data.lights.new(name, "SUN")
+        data.energy, data.angle = energy, math.radians(angle)
+        ob = bpy.data.objects.new(name, data)
+        sc.collection.objects.link(ob)
+        ob.rotation_euler = travels.normalized().to_track_quat("-Z", "Y").to_euler()   # a sun shines along its -Z
+    world = sc.world or bpy.data.worlds.new("WRL_Plate")
+    sc.world = world
+    world.use_nodes = True
+    bg = next((n for n in world.node_tree.nodes if n.type == "BACKGROUND"), None)
+    if bg is not None:
+        bg.inputs["Color"].default_value = (0.20, 0.21, 0.23, 1.0)
+        bg.inputs["Strength"].default_value = 0.8
+
+
 # ---------------------------------------------------------------- Melee -> Blender
 class Mapping:
     def __init__(self, s, xc, ground_y, cx, zg, y0):
@@ -108,16 +280,21 @@ class Mapping:
         return Vector((self.cx + (X - self.xc) / self.s, self.y0 - Z / self.s, self.zg + (Y - self.ground_y) / self.s))
 
 
-def make_camera(sc, cam, mapping, scale):
-    """A Blender camera that sees the mapped world exactly as Melee's camera sees the real one."""
-    mc = projection.Camera(tuple(cam["eye"]), cam["fov"], cam["vert"], cam.get("horz", 0.0),
-                           cam.get("aspect", projection.ASPECT))
-    width, height = mc.size(scale)
+def make_camera(sc, cam, mapping, scale, size=None, clip=(0.05, 400.0)):
+    """A Blender camera that sees the mapped world exactly as Melee's camera sees the real one. With `interest`
+    in the job the camera looks at that point (the game's own, projection.game_interest), else at the point
+    Camera.interest works out from the stage's angles. size: the recording's [width, height]."""
+    aspect = cam.get("aspect", projection.ASPECT)
+    if cam.get("interest"):
+        mc = projection.LookAtCamera(tuple(cam["eye"]), tuple(cam["interest"]), cam["fov"], 0.0, aspect)
+    else:
+        mc = projection.Camera(tuple(cam["eye"]), cam["fov"], cam["vert"], cam.get("horz", 0.0), aspect)
+    width, height = (int(size[0]), int(size[1])) if size else mc.size(scale)
     data = bpy.data.cameras.new("CAM_Melee")
     data.sensor_fit = "HORIZONTAL"
     data.sensor_width = 36.0
     data.lens = (data.sensor_width / 2) / mc.tan_half_h
-    data.clip_start, data.clip_end = 0.05, 400.0
+    data.clip_start, data.clip_end = clip
     data.dof.use_dof = False
     ob = bpy.data.objects.new("CAM_Melee", data)
     sc.collection.objects.link(ob)
@@ -128,9 +305,11 @@ def make_camera(sc, cam, mapping, scale):
     bpy.context.view_layer.update()   # world_to_camera_view reads matrix_world, which is stale until now
     r = sc.render
     r.resolution_x, r.resolution_y, r.resolution_percentage = width, height, 100
-    # Melee's picture is 640 x 528 for a camera aspect of 1.2173: the pixels are a hair wider than tall.
-    ratio = width / (height * mc.aspect)
-    r.pixel_aspect_x, r.pixel_aspect_y = 1.0 / ratio, 1.0
+    # Melee's picture is 640 x 528 for a camera aspect of 1.2173: the pixels are a hair wider than tall. A raw
+    # recording, 640 x 480, has pixels narrower than tall; Blender's pixel aspects are 1 or more, so that one goes
+    # on y (as import_melee_camera.pixel_aspect does).
+    wide = height * mc.aspect / width
+    r.pixel_aspect_x, r.pixel_aspect_y = (wide, 1.0) if wide >= 1.0 else (1.0, 1.0 / wide)
     return ob, mc
 
 
@@ -280,15 +459,16 @@ def build_ink_material(name="M_Outline_Ink", color=CEL["ink"]):
     return mat
 
 
-def apply_cel(ob, thickness):
-    """Flat toon bands plus an ink outline shell (Solidify, flipped normals, offset +1), like the character's."""
-    cel, ink = build_cel_material(), build_ink_material()
+def apply_cel(ob, thickness, materials=None):
+    """Flat toon bands plus an ink outline shell (Solidify, flipped normals, offset +1), like the character's.
+    materials: the (cel, ink) pair to use, so that several objects share one."""
+    cel, ink = materials or (build_cel_material(), build_ink_material())
     me = ob.data
     me.materials.clear()
     me.materials.append(cel)
     me.materials.append(ink)
-    for poly in me.polygons:
-        poly.material_index = 0
+    me.polygons.foreach_set("material_index", [0] * len(me.polygons))
+    me.update()
     mod = ob.modifiers.new("Outline", "SOLIDIFY")
     mod.use_flip_normals = True
     mod.offset = 1.0
@@ -341,8 +521,10 @@ def configure_render(sc, job):
     ee = sc.eevee
     cel = job["style"] == "cel"
     samples = int(job.get("samples") or (32 if cel else 64))
+    # No overscan: EEVEE's moves the picture off the camera's projection (up to 0.5 px at 640 x 528, 1.6 px with
+    # the non-square pixels of a raw recording), which the fighters would then not stand on.
     for attr, value in (("taa_render_samples", samples), ("use_raytracing", not cel), ("use_shadows", True),
-                        ("use_overscan", True), ("overscan_size", 3.0), ("motion_blur_steps", 1)):
+                        ("use_overscan", False), ("motion_blur_steps", 1)):
         if hasattr(ee, attr):
             setattr(ee, attr, value)
     r.use_motion_blur = False
@@ -364,16 +546,52 @@ def configure_render(sc, job):
         sc.compositing_node_group = None   # the project's own render script adds a glow pass in memory; not wanted here
 
 
+def import_moving_camera(sc, path, mapping):
+    """The camera export as an animated camera in the mapped world (tools/camera-export/import_melee_camera.py):
+    Melee's point (X, Y, Z) lands at offset + (X, -Z, Y) / s there, which is mapping.point. It also sets the
+    scene's resolution, pixel aspect, frame rate (exactly 60) and frame range to the video's."""
+    if CAMERA_EXPORT_DIR not in sys.path:
+        sys.path.insert(0, CAMERA_EXPORT_DIR)
+    import import_melee_camera as imc
+    opts = imc.Options(scale=1.0 / mapping.s, offset=tuple(mapping.point((0.0, 0.0, 0.0))), frame_start=1,
+                       name="CAM_Melee_Moving")
+    return imc.import_file(path, opts, sc)
+
+
+def render_sequence(sc, job):
+    """Every frame of the moving camera (or the job's `frames` of them) as out/000001.png, out/000002.png...
+    Frames already there are kept, so an interrupted render picks up where it stopped."""
+    folder = Path(job["out"])
+    folder.mkdir(parents=True, exist_ok=True)
+    if job.get("frames"):
+        sc.frame_start, sc.frame_end = (int(f) for f in job["frames"])
+    r = sc.render
+    r.filepath = str(folder / "######.png")
+    r.use_overwrite = False
+    r.use_placeholder = False
+    r.image_settings.color_depth = "8"
+    log(f"frames {sc.frame_start} to {sc.frame_end} -> {folder}")
+    bpy.ops.render.render(animation=True)
+    return [sc.frame_start, sc.frame_end]
+
+
 def main():
     job = json.loads(Path(sys.argv[sys.argv.index("--") + 1]).read_text(encoding="utf-8"))
     sc = bpy.context.scene
-    log("scene", sc.name, "style", job["style"], "->", job["out"])
+    model = job.get("model")
+    log("scene", sc.name, "model", model["path"] if model else LOGO, "style", job["style"], "->", job["out"])
     sc.frame_set(int(job.get("frame", 1)))
-    ob = sc.objects[LOGO]
 
     fit, ground = job["fit"], job["ground"]
-    lf = logo_frame(ob, fit.get("to", "bbox"), ground.get("line", "xheight"))
-    s = fit["width"] / (lf["x1"] - lf["x0"])
+    if model:
+        objects = load_model(sc, model)
+        if model.get("rotation"):
+            turn(objects, model["rotation"])
+        lf = model_frame(objects, ground.get("line", "top"))
+    else:
+        objects = [sc.objects[LOGO]]
+        lf = logo_frame(objects[0], fit.get("to", "bbox"), ground.get("line", "xheight"))
+    s = fit["width"] * float(fit.get("scale", 1.0)) / (lf["x1"] - lf["x0"])
     cx = 0.5 * (lf["x0"] + lf["x1"])
     # y0: where Melee's z = 0 plane sits across the logo's depth (0 = the logo's middle, +1 = its front face)
     y_mid = 0.5 * (lf["y0"] + lf["y1"])
@@ -381,16 +599,27 @@ def main():
     zg = lf["ground"] - float(ground.get("offset", 0.0)) / s
     mapping = Mapping(s, fit["center_x"], ground.get("y", 0.0), cx, zg, y0)
     scale = int(job.get("scale", 1))
-    cam_ob, mc = make_camera(sc, job["camera"], mapping, scale)
+    size = job.get("size")
+    # A model can be any size in Blender: clip where Melee does (0.1 and 16384 units), in its units.
+    clip = (0.1 / s, 16384.0 / s) if model else (0.05, 400.0)
+    cam_ob, mc = make_camera(sc, job["camera"], mapping, scale, size, clip)
 
-    width_px, _ = mc.pixels_per_unit(fit["center_x"], ground.get("y", 0.0), 0.0, scale)
+    width_px, _ = mc.pixels_per_unit(fit["center_x"], ground.get("y", 0.0), 0.0, scale, size)
     px_per_m = width_px * s
     if job["style"] == "cel":
         outline_px = float(job.get("outline_px") or max(1.0, 0.6 * scale))
-        apply_cel(ob, outline_px / px_per_m)
+        materials = (build_cel_material(), build_ink_material())
+        for ob in objects:
+            apply_cel(as_mesh(ob), outline_px / px_per_m, materials)
+    elif model and not any(o.type == "LIGHT" for o in sc.objects):
+        add_light_rig(sc, mapping.point(mc.eye), mapping.point(mc.interest))
     configure_render(sc, job)
+    if model and Path(model["path"]).suffix.lower() != ".blend":
+        # an imported model's colours as authored, like the game's (a .blend keeps its own colour management)
+        set_enum(sc.view_settings, "view_transform", ["Standard"])
+        set_enum(sc.view_settings, "look", ["None"])
     env_tilt = None
-    if job["style"] == "metal" and job.get("tilt_studio", True):
+    if not model and job["style"] == "metal" and job.get("tilt_studio", True):
         eye_b, spot = mapping.point(mc.eye), mapping.point((fit["center_x"], ground.get("y", 0.0), 0.0))
         elevation = math.degrees(math.atan2(eye_b.z - spot.z, abs(eye_b.y - spot.y)))
         env_tilt = elevation - REFERENCE_ELEVATION_DEG
@@ -401,12 +630,18 @@ def main():
         logo_bottom_z=lf["bottom"], px_per_logo_m=px_per_m, size=[sc.render.resolution_x, sc.render.resolution_y],
         pixel_aspect=[sc.render.pixel_aspect_x, sc.render.pixel_aspect_y], islands=lf["islands"],
         lens_mm=cam_ob.data.lens, camera_logo_space=list(cam_ob.location), studio_tilt_deg=env_tilt,
+        objects=[ob.name for ob in objects],
     )
     # Blender's own projection of the stage's anchor points, to compare with projection.py
     probes = {name: mapping.point(p) for name, p in job.get("probes", {}).items()}
     report["probes_blender_px"] = {name: list(world_to_pixel(sc, cam_ob, p)) for name, p in probes.items()}
-    report["probes_melee_px"] = {name: list(mc.project(p, scale)) for name, p in job.get("probes", {}).items()}
-    if job.get("render", True):
+    report["probes_melee_px"] = {name: list(mc.project(p, scale, size)) for name, p in job.get("probes", {}).items()}
+    if job.get("camera_export"):
+        report["moving_camera"] = import_moving_camera(sc, job["camera_export"], mapping)
+        report["size"] = [sc.render.resolution_x, sc.render.resolution_y]
+        if job.get("render", True):
+            report["frames"] = render_sequence(sc, job)
+    elif job.get("render", True):
         bpy.ops.render.render(write_still=True)
     print("PLATE_REPORT " + json.dumps(report))
     if job.get("report"):

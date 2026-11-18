@@ -141,14 +141,19 @@ def alpha_stats(ffmpeg: str, video: Path, tmp: Path, every: int = 60) -> dict:
             "opaque_median": round(statistics.median(op), 3) if op else None}
 
 
-def contact_sheet(ffmpeg: str, video: Path, frames: int, width: int, height: int, png: Path) -> None:
+def contact_sheet(ffmpeg: str, video: Path, frames: int, width: int, height: int, png: Path,
+                  alpha: bool = True) -> None:
+    """Eight frames over magenta with their alpha below; without alpha (--keep-background), the frames only."""
     picks = [int((i + 0.5) * frames / 8) for i in range(8)]
     sel = "+".join(f"eq(n\\,{k})" for k in picks)
     h = round(320 * height / width / 2) * 2
-    graph = (f"[0:v]select='{sel}',setpts=N/(60*TB),scale=320:{h},format=rgba,split[f][a];"
-             f"color=c=magenta:s=320x{h}:r=60[bg];[bg][f]overlay=format=auto:shortest=1,tile=4x2[top];"
-             f"[a]alphaextract,format=gray,tile=4x2[bot];[top]format=rgb24[t2];[bot]format=rgb24[b2];"
-             f"[t2][b2]vstack[o]")
+    if alpha:
+        graph = (f"[0:v]select='{sel}',setpts=N/(60*TB),scale=320:{h},format=rgba,split[f][a];"
+                 f"color=c=magenta:s=320x{h}:r=60[bg];[bg][f]overlay=format=auto:shortest=1,tile=4x2[top];"
+                 f"[a]alphaextract,format=gray,tile=4x2[bot];[top]format=rgb24[t2];[bot]format=rgb24[b2];"
+                 f"[t2][b2]vstack[o]")
+    else:
+        graph = f"[0:v]select='{sel}',setpts=N/(60*TB),scale=320:{h},tile=4x2,format=rgb24[o]"
     subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-y", *decoder_args(video), "-i", str(video),
                     "-filter_complex", graph, "-map", "[o]", "-frames:v", "1", str(png)], check=True)
 
@@ -200,7 +205,8 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
     first, last = slp.clip_range(info, flag_value(args, "--start-frame"), flag_value(args, "--end-frame"))
     expected = last - first + 1
     res = {"replay": replay.name, "label": entry["label"], "args": args, "expected_frames": expected,
-           "game_seconds": round(expected / 60, 1), "mid_match": first > slp.FIRST_FRAME + 1}
+           "game_seconds": round(expected / 60, 1), "mid_match": first > slp.FIRST_FRAME + 1,
+           "to_end": last == info.last_frame}
     print(f"\n== {replay.name} [{' '.join(args) or 'default'}]: {entry['label']}", flush=True)
     fmt = args[args.index("--format") + 1] if "--format" in args else solve.DEFAULT_FORMAT
     missing = solve.missing_encoder(locate.find_ffmpeg(), fmt)
@@ -232,6 +238,7 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
     camera_files = [p for p in printed if p.suffix == ".json"]
 
     ff, fp = locate.find_ffmpeg(), locate.find_ffmpeg(name="ffprobe")
+    plain = "--keep-background" in args   # recorded without the flicker: one opaque video, nothing to pair
     tmp = Path(tempfile.mkdtemp(prefix="render-test-"))
     try:
         if videos and videos[0].exists():
@@ -245,14 +252,16 @@ def run_one(entry: dict, args: List[str], replay: Path, out_root: Path, opts) ->
                 alpha_probe = probe(fp, videos[1])
                 res["output"]["alpha_map_frames"] = int(alpha_probe.get("nb_read_packets", 0))
                 res["output"]["alpha_map_rate"] = alpha_probe.get("r_frame_rate")
-            res["alpha"] = alpha_stats(ff, videos[0], tmp)
+            if not plain:
+                res["alpha"] = alpha_stats(ff, videos[0], tmp)
             sheet = out_dir / "sheet.png"
-            contact_sheet(ff, videos[0], res["output"]["frames"], int(pr["width"]), int(pr["height"]), sheet)
+            contact_sheet(ff, videos[0], res["output"]["frames"], int(pr["width"]), int(pr["height"]), sheet,
+                          alpha=not plain)
             res["sheet"] = str(sheet)
         if "--export-camera" in args:
             res["camera"] = camera_check(camera_files, work)
         recordings = sorted(work.rglob("*.mkv")) + sorted(work.rglob("*.avi")) if work and work.exists() else []
-        if recordings and not opts.quick:
+        if recordings and not opts.quick and not plain:
             res["pairs"] = pair_check(ff, recordings[0], expected, tmp)
     except subprocess.CalledProcessError as e:
         res["check_error"] = f"{' '.join(map(str, e.cmd[:3]))}... exited {e.returncode}"
@@ -288,6 +297,9 @@ def problems(res: dict) -> List[str]:
         lo, hi = res["expected_frames"] - 1, res["expected_frames"]
         if res.get("mid_match"):
             lo = hi
+        if "--keep-background" in res["args"] and res.get("to_end"):
+            # without the flicker the game's last picture comes after the playback has ended, unrecorded
+            lo -= 1
         if o.get("codec") == "gif":  # GIF timing can't do 60 fps: the solver writes 50 fps
             lo, hi = (round(n * 50 / (60000 / 1001)) for n in (lo, hi))
             lo -= 1

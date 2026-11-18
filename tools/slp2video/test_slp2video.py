@@ -1,0 +1,194 @@
+#!/usr/bin/env python3
+"""Tests for slp2video's planning: which render, model, composite and CRT steps a set of options gives (no Dolphin,
+Blender or CRT needed).
+
+    python3 tools/slp2video/test_slp2video.py
+"""
+
+from __future__ import annotations
+
+import sys
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import slp2video  # noqa: E402
+import plate  # noqa: E402  (tools/logo-stage, on the path through slp2video)
+import projection  # noqa: E402
+
+BATTLEFIELD, DREAM_LAND, FINAL_DESTINATION, YOSHIS = 31, 28, 32, 8
+REPLAY = Path("/replays/game.slp")
+
+
+def options(*argv):
+    args, passthrough = slp2video.parse(["game.slp", *argv])
+    return args
+
+
+def plan(*argv, stage=BATTLEFIELD):
+    return slp2video.make_plan(options(*argv), stage)
+
+
+class WhatIsDrawn(unittest.TestCase):
+    def test_the_default_is_the_stage_without_its_background_where_it_can_be_removed(self):
+        for stage in (BATTLEFIELD, DREAM_LAND):
+            p = plan(stage=stage)
+            self.assertEqual((p.mode, p.transparent, p.background, p.notes), ("stage", True, None, []))
+
+    def test_elsewhere_only_the_fighters_with_a_note(self):
+        p = plan(stage=FINAL_DESTINATION)
+        self.assertEqual(p.mode, "characters")
+        self.assertIn("--keep-background", p.notes[0])
+
+    def test_keep_background_is_the_game_as_it_looks_on_every_stage(self):
+        for stage in (BATTLEFIELD, FINAL_DESTINATION, YOSHIS):
+            p = plan("--keep-background", stage=stage)
+            self.assertEqual((p.mode, p.transparent, p.background), ("game", False, None))
+
+    def test_keep_background_refuses_what_it_would_ignore(self):
+        for extra in (["--model", "statue.glb"], ["--characters-only"], ["--bg-color", "00ff00"],
+                      ["--transparency"], ["--hide-items"]):
+            with self.assertRaises(slp2video.UsageError, msg=extra):
+                plan("--keep-background", *extra)
+
+    def test_a_model_hides_the_stage(self):
+        p = plan("--model", "statue.glb", stage=DREAM_LAND)
+        self.assertEqual((p.mode, p.model, p.style), ("characters", "statue.glb", "original"))
+
+    def test_the_shy_guy_sprite_only_on_yoshis_story(self):
+        self.assertIsNone(plan("--shy-guy-sprite", "me.png").sprite)
+        p = plan("--shy-guy-sprite", "me.png", stage=YOSHIS)
+        self.assertEqual((p.sprite, p.mode), ("me.png", "characters"))
+        self.assertEqual(plan("--shy-guy-sprite", "me.png", "--keep-background", stage=YOSHIS).mode, "game")
+
+
+class Transparency(unittest.TestCase):
+    def test_bg_color_flattens(self):
+        p = plan("--bg-color", "#00FF00")
+        self.assertEqual((p.transparent, p.background), (False, "00ff00"))
+
+    def test_no_transparency_flattens_onto_black(self):
+        p = plan("--no-transparency")
+        self.assertEqual((p.transparent, p.background), (False, "000000"))
+
+    def test_mp4_has_no_alpha(self):
+        p = plan("--format", "mp4")
+        self.assertEqual((p.transparent, p.background), (False, "000000"))
+        with self.assertRaises(slp2video.UsageError):
+            plan("--format", "mp4", "--transparency")
+
+    def test_a_bad_colour(self):
+        with self.assertRaises(slp2video.UsageError):
+            plan("--bg-color", "green")
+
+    def test_the_format_follows_the_output_name(self):
+        self.assertEqual(options("-o", "clip.mp4").format, "mp4")
+        self.assertEqual(options("-o", "clip").format, "mov")
+        with self.assertRaises(SystemExit):
+            options("-o", "clip.mp4", "--format", "mov")
+
+
+class ScaleAndCrt(unittest.TestCase):
+    def test_default_scale(self):
+        self.assertEqual(plan().scale, 1)
+        self.assertEqual(plan("--animelee").scale, 2)
+        self.assertEqual(plan("--scale", "3").scale, 3)
+
+    def test_regular_melee_goes_on_the_crt_at_native_resolution(self):
+        p = plan("--crt")
+        self.assertEqual((p.scale, p.raw), (1, True))
+        self.assertEqual(p.notes, [])
+
+    def test_a_higher_scale_on_the_crt_is_kept_with_a_note(self):
+        p = plan("--crt", "--scale", "2")
+        self.assertEqual(p.scale, 2)
+        self.assertIn("native resolution", p.notes[0])
+
+    def test_animelee_on_the_crt_keeps_its_scale(self):
+        p = plan("--crt", "--animelee")
+        self.assertEqual((p.scale, p.raw, p.notes), (2, True, []))
+
+    def test_only_the_crt_records_the_raw_picture(self):
+        self.assertFalse(plan().raw)
+
+    def test_the_picture_is_as_wide_as_melee_draws_it(self):
+        self.assertEqual(slp2video.crt_width(480), 584)
+        self.assertEqual(slp2video.crt_width(960), 1168)
+        self.assertEqual(slp2video.crt_width(1440), 1752)
+
+
+class Models(unittest.TestCase):
+    def test_finishes(self):
+        self.assertEqual(plan("--model", "logo").style, "metal")
+        self.assertEqual(plan("--model", "logo", "--animelee").style, "cel")
+        self.assertEqual(plan("--model", "x.glb", "--animelee").style, "cel")
+        self.assertEqual(plan("--model", "x.glb", "--animelee", "--no-model-cel").style, "original")
+        self.assertEqual(plan("--model", "x.glb", "--model-cel").style, "cel")
+
+    def test_the_moving_camera_needs_the_camera_export(self):
+        self.assertTrue(plan("--model", "x.glb").export_camera)
+        self.assertFalse(plan("--model", "x.glb", "--static-camera").export_camera)
+        self.assertFalse(plan().export_camera)
+
+    def test_rotation(self):
+        self.assertEqual(plate.rotation("90"), 90.0)
+        self.assertEqual(plate.rotation("90,0,45"), [90.0, 0.0, 45.0])
+
+    def test_frames_are_shared_between_processes(self):
+        self.assertEqual(plate.chunks(300, 2), [(1, 150), (151, 300)])
+        self.assertEqual(plate.chunks(5, 3), [(1, 2), (3, 3), (4, 5)])
+        self.assertEqual(plate.chunks(1, 4), [(1, 1)])
+
+    def test_recording_sizes(self):
+        self.assertEqual(projection.recording_size(1), (640, 528))
+        self.assertEqual(projection.recording_size(3), (1920, 1580))
+        self.assertEqual(projection.recording_size(2, raw=True), (1280, 960))
+
+
+class Commands(unittest.TestCase):
+    def render_args(self, *argv, stage=BATTLEFIELD, passthrough=()):
+        args = options(*argv)
+        return slp2video.slp2alpha_args(args, slp2video.make_plan(args, stage), REPLAY, Path("/work"), passthrough)
+
+    def test_the_default_render(self):
+        self.assertEqual(self.render_args(), ["render", str(REPLAY), "--out-dir", "/work", "--scale", "1",
+                                              "--format", "mov"])
+
+    def test_a_model_with_the_moving_camera_on_the_crt(self):
+        a = self.render_args("--model", "x.glb", "--crt", "--start-frame", "100", "--no-hud",
+                             passthrough=["--debug"])
+        for flag in ("--characters-only", "--export-camera", "--raw-resolution", "--no-hud", "--debug"):
+            self.assertIn(flag, a)
+        self.assertEqual(a[a.index("--start-frame") + 1], "100")
+        self.assertNotIn("--static-camera", a)
+
+    def test_the_game_as_it_looks(self):
+        a = self.render_args("--keep-background", "--static-camera", "--animelee", stage=FINAL_DESTINATION)
+        for flag in ("--keep-background", "--static-camera", "--animelee"):
+            self.assertIn(flag, a)
+        self.assertEqual(a[a.index("--scale") + 1], "2")
+
+
+class Names(unittest.TestCase):
+    def test_this_runs_steps_are_added(self):
+        args = options("--model", "statue.glb", "--bg-color", "112233", "--crt", "--crt-mask", "slot")
+        p = slp2video.make_plan(args, BATTLEFIELD)
+        self.assertEqual(slp2video.output_name("game (characters only, raw resolution, 60 fps)", p, args),
+                         "game (characters only, 60 fps), statue stage, on 112233, crt slot mask")
+
+    def test_the_crt_drops_the_raw_label(self):
+        args = options("--keep-background", "--crt")
+        p = slp2video.make_plan(args, BATTLEFIELD)
+        self.assertEqual(slp2video.output_name("game (with background, raw resolution)", p, args),
+                         "game (with background), crt")
+        self.assertEqual(slp2video.output_name("game (raw resolution)", p, args), "game, crt")
+        self.assertEqual(slp2video.output_name("game (1) (raw resolution)", p, args), "game (1), crt")
+
+    def test_a_plain_render_keeps_its_name(self):
+        args = options()
+        self.assertEqual(slp2video.output_name("game", slp2video.make_plan(args, BATTLEFIELD), args), "game")
+
+
+if __name__ == "__main__":
+    unittest.main()

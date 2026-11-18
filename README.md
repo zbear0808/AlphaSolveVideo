@@ -17,13 +17,21 @@ cd tools/slp2alpha
 python3 -m slp2alpha render replay.slp --characters-only
 ```
 
+- **One command for everything:** [`tools/slp2video`](tools/slp2video/README.md) takes a replay to a finished video: your logo or sprite on the Shy Guys, your 3D model in place of the stage (fixed or moving camera), the background kept or removed, transparency or a colour, regular Melee or Animelee, and a CRT finish at the console's native resolution ([guide](docs/slp2video.md)):
+
+  ```sh
+  python3 tools/slp2video/slp2video.py replay.slp --model statue.glb --animelee --crt
+  ```
+
 - **Features:**
   - `--characters-only`: hides the stage and particles; works across all legal stages.
+  - `--keep-background`: records the game as it looks, background and all, as an ordinary opaque video; works on every stage.
   - `--static-camera`: locks the camera in fixed mode for still framing.
   - `--start-frame N --end-frame M`: renders combo clips directly from Slippi frame numbers.
   - `--shy-guy-sprite IMAGE`: draws Yoshi's Story Shy Guys with your own image or logo.
   - `--animelee`: renders with Animelee cel-shaded skins.
   - `--export-camera`: also writes Melee's camera on every frame, for Blender ([`tools/camera-export`](tools/camera-export/README.md)).
+  - `--raw-resolution`: records the console's unstretched 640x480 picture, one row per scanline (for CRT effects).
 - **Documentation & Research:** See the [**Documentation Index**](docs/README.md) for feature guides, reverse engineering research, and architecture plans.
 - **Testing:** See [`tools/render-tests/`](tools/render-tests/README.md) for the regression test harness.
 - **Reverse Engineering & Probes:** See [`research/`](research/README.md) for calibration and probe tools.

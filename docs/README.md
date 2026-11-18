@@ -10,11 +10,12 @@ Guides for features integrated into `python3 -m slp2alpha render`:
 
 | Guide | Description | Key Options |
 |---|---|---|
+| **[One Command: Replay to Video](slp2video.md)** | `tools/slp2video`: the render, your 3D model as the stage, transparency or a colour, and a CRT look, in one command. | `--model`, `--keep-background`, `--crt` |
 | **[Rendering Clips](clips.md)** | Render specific frame ranges (e.g., combos) without rendering entire replays. | `--start-frame`, `--end-frame` |
 | **[Static Camera](static-camera.md)** | Lock the camera in place using Melee's fixed-camera mode with screen shake disabled. | `--static-camera` |
 | **[Custom Shy Guy Sprites](shy-guy-sprite.md)** | Replace Yoshi's Story Shy Guys with a custom logo or image via Dolphin custom textures. | `--shy-guy-sprite`, `--scale` |
 | **[Animelee Cel-Shaded Skins](../tools/animelee/README.md)** | Render replays with Animelee's cel-shaded character models and stages. | `--animelee`, `tools/animelee/build_iso.py` |
-| **[Logo as the Stage](logo-stage.md)** | Fighters over a 3D logo sized to the stage, seen through Melee's own camera. | `tools/logo-stage/logo_stage.py`, `--animelee` |
+| **[Logo as the Stage](logo-stage.md)** | Fighters over a 3D logo, or any model, sized to the stage, seen through Melee's own camera. | `tools/logo-stage/logo_stage.py`, `plate.py --model` |
 | **[Camera Export](camera-export.md)** | Melee's camera on every frame of a render, and an importer that turns it into a Blender camera. | `--export-camera`, `tools/camera-export` |
 
 ---

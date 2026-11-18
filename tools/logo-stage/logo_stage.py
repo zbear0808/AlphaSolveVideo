@@ -18,8 +18,6 @@ scale only needs step 3. Options after a lone `--` go to `slp2alpha render` (e.g
 from __future__ import annotations
 
 import argparse
-import hashlib
-import json
 import shutil
 import subprocess
 import sys
@@ -42,11 +40,7 @@ CACHE = locate.cache_root() / "logo-stage" / "plates"
 
 def plate_key(job: dict, project: Path) -> str:
     """Everything the picture depends on: the job (camera, fit, style, scale...), the look in the Blender project, the code."""
-    spec = {k: v for k, v in job.items() if k not in ("out", "report", "render")}
-    stat = project.stat()
-    code = b"".join((HERE / n).read_bytes() for n in ("blender_plate.py", "projection.py"))
-    blob = json.dumps(spec, sort_keys=True).encode() + f"{project.resolve()}:{stat.st_size}:{int(stat.st_mtime)}".encode() + code
-    return hashlib.sha1(blob).hexdigest()[:12]
+    return plate.job_key(job, project)
 
 
 def get_plate(stage: int, style: str, scale: int, *, iso: Optional[str], logo_project: Optional[str], blender: Optional[str],
@@ -145,7 +139,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         flat = args.format == "mp4" or bool(args.background)
         final = out_dir / f"{tag}, logo stage.{'mp4' if flat else 'mov'}"
         t0 = time.monotonic()
-        composite.composite(plate_png, transparent, final, background=args.background, fmt=args.format,
+        composite.composite(plate_png, transparent, final, background=args.background, fmt="mp4" if flat else "mov",
                             ffmpeg=args.ffmpeg, ffprobe=None)
         print(f"composited in {time.monotonic() - t0:.0f} s\n  {final}")
     finally:

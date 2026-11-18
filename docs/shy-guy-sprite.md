@@ -6,7 +6,7 @@
 python3 -m slp2alpha render game.slp --characters-only --static-camera --scale 2 --shy-guy-sprite mascot.png
 ```
 
-The output name gets "shy guy sprite". The replay has to be on Yoshi's Story: on another stage the option prints a note and does nothing. It needs `--characters-only` (Yoshi's Story can't be rendered with its stage showing, see `docs/stage-backgrounds.md`), can't be combined with `--hide-items` (Shy Guys are items), and needs the headless mainline build. It works with `--animelee`.
+The output name gets "shy guy sprite". The replay has to be on Yoshi's Story: on another stage the option prints a note and does nothing. It needs `--characters-only`, or `--keep-background` to draw the whole stage with your Shy Guys in an opaque video (Yoshi's Story's background can't be removed with its stage showing, see `docs/stage-backgrounds.md`), can't be combined with `--hide-items` (Shy Guys are items), and needs the headless mainline build. It works with `--animelee`.
 
 ## The image
 
@@ -29,4 +29,4 @@ A Shy Guy is a flat square textured with three images (RGB5A3, 76x72, 76x72 and 
 
 ## Checked
 
-`tools/render-tests` has a clip with the option (frames 1500 to 1800 of the Yoshi's Story replay, fixed camera): 301 frames, no warnings. The sprite was also checked by eye over light and dark backgrounds with no outline, on the vanilla disc and on Animelee, at `--scale 1` and `2`.
+`tools/render-tests` has a clip with the option (frames 1500 to 1800 of the Yoshi's Story replay, fixed camera): 301 frames, no warnings, and the same clip with `--keep-background`. The sprite was also checked by eye over light and dark backgrounds with no outline, on the vanilla disc and on Animelee, at `--scale 1` and `2`.
