@@ -1,6 +1,6 @@
 # Linux: the patched mainline Dolphin, slp2alpha and a GitHub Actions build
 
-Status: plan, November 2026. Nothing here is implemented yet. It covers bringing the headless mainline Dolphin and slp2alpha to Linux, as [`plan-windows-mainline.md`](plan-windows-mainline.md) did for Windows, and a GitHub Actions workflow that builds the Linux package. The source facts come from the pinned Dolphin checkout (`~/Library/Caches/AlphaSolveVideo/mainline`, commit `c5f6359`, with this repo's patches 0001–0006 applied). The Docker facts were measured on this Mac.
+Status: implemented in `427c950` (November 2026), and run on an x86_64 PC with a GPU: the camera export matches the Mac's byte for byte, and the render tests pass. [`plan-linux-gpu.md`](plan-linux-gpu.md) has that PC and what's left there. Below is the plan as it was written; its [to test] items are not yet updated. It covers bringing the headless mainline Dolphin and slp2alpha to Linux, as [`plan-windows-mainline.md`](plan-windows-mainline.md) did for Windows, and a GitHub Actions workflow that builds the Linux package. The source facts come from the pinned Dolphin checkout (`~/Library/Caches/AlphaSolveVideo/mainline`, commit `c5f6359`, with this repo's patches 0001–0006 applied). The Docker facts were measured on this Mac.
 
 Evidence tags:
 
