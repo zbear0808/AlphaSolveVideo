@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import statistics
@@ -360,7 +361,10 @@ def main() -> int:
                     help="only re-evaluate saved results with the current checks (renders nothing)")
     ap.add_argument("--fetch-only", action="store_true",
                     help=f"only download the replays (into {cache_dir()}) and list them")
+    ap.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
     opts = ap.parse_args()
+    if opts.iso:  # the renders run slp2alpha, which takes it from here
+        os.environ["SLP2ALPHA_ISO"] = str(Path(opts.iso).expanduser().resolve())
 
     manifest = json.loads((HERE / "replays.json").read_text(encoding="utf-8"))
     if opts.fetch_only:

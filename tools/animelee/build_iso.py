@@ -7,10 +7,10 @@
 --zip      a downloaded "ANIMELEE_-_COMPLETE_EDITION_-_PATCH_1.0.zip"; without it the zip is fetched from
            animelee.xyz's MediaFire link (30 MB).
 --out      defaults to "ANIMELEE - COMPLETE EDITION.iso" in animelee/ under the cache folder
-           (~/Library/Caches/AlphaSolveVideo on macOS, %LOCALAPPDATA%\\AlphaSolveVideo on Windows), where
-           `slp2alpha render --animelee` looks for it.
---xdelta3  the xdelta3 program, if it isn't on the PATH as xdelta3 (macOS: brew install xdelta; Windows: the
-           x86_64 .exe from https://github.com/jmacd/xdelta-gpl/releases).
+           (~/Library/Caches/AlphaSolveVideo on macOS, %LOCALAPPDATA%\\AlphaSolveVideo on Windows,
+           ~/.cache/AlphaSolveVideo on Linux), where `slp2alpha render --animelee` looks for it.
+--xdelta3  the xdelta3 program, if it isn't on the PATH as xdelta3 (macOS: brew install xdelta; Linux: sudo apt
+           install xdelta3; Windows: the x86_64 .exe from https://github.com/jmacd/xdelta-gpl/releases).
 
 The patch only changes data files (the DOL is identical), so every Gecko code in Resources/ keeps working.
 """
@@ -63,8 +63,9 @@ def main() -> int:
 
     xdelta3 = args.xdelta3 or shutil.which("xdelta3")
     if not xdelta3 or not Path(xdelta3).exists():
-        print("xdelta3 not found (macOS: brew install xdelta; Windows: the .exe from "
-              "https://github.com/jmacd/xdelta-gpl/releases, on the PATH or passed with --xdelta3)", file=sys.stderr)
+        print("xdelta3 not found (macOS: brew install xdelta; Linux: sudo apt install xdelta3; Windows: the .exe "
+              "from https://github.com/jmacd/xdelta-gpl/releases, on the PATH or passed with --xdelta3)",
+              file=sys.stderr)
         return 1
     try:
         iso = locate.find_iso(args.iso)

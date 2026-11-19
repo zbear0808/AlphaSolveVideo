@@ -47,7 +47,11 @@ def build_hint() -> str:
     if os.name == "nt":
         return ("build it with tools\\dolphin-build\\build-windows-mainline.py, or unpack the zip from the "
                 "\"Windows playback Dolphin\" GitHub Actions workflow into packages\\slippi-playback-mainline")
-    return "there is no build script for this platform yet (docs/plan-windows-mainline.md has the Windows one)"
+    if sys.platform.startswith("linux"):
+        return ("build it with tools/dolphin-build/build-linux-mainline.py (or in Docker, with "
+                "tools/dolphin-build/linux.Dockerfile), or unpack the tarball from the \"Linux playback Dolphin\" "
+                "GitHub Actions workflow into packages/")
+    return "there is no build script for this platform yet (docs/plan-linux.md has the Linux one)"
 
 
 def utf8_child_env() -> dict:
@@ -82,6 +86,9 @@ def find_dolphin(explicit: Optional[str] = None) -> Path:
         candidates.append(mainline_package())
         candidates.append(PACKAGES / "slippi-playback-3.5.2" / "Slippi Dolphin.exe")
         candidates.append(launcher_data_dir() / "playback" / "Slippi Dolphin.exe")
+    else:
+        # The headless build (tools/dolphin-build/build-linux-mainline.py). The Launcher's AppImage can't record.
+        candidates.append(mainline_package())
     for c in candidates:
         if c.exists():
             return c
@@ -94,16 +101,19 @@ def launcher_playback_app() -> Optional[Path]:
 
 
 def find_iso(explicit: Optional[str] = None) -> Path:
-    if explicit:
-        p = Path(explicit).expanduser()
-        if not p.exists():
-            raise NotFound(f"ISO not found: {p}")
-        return p
+    """--iso, else $SLP2ALPHA_ISO (which tools that run slp2alpha set for it), else the Slippi Launcher's setting."""
+    for given, what in ((explicit, "--iso"), (os.environ.get("SLP2ALPHA_ISO"), "SLP2ALPHA_ISO")):
+        if given:
+            p = Path(given).expanduser()
+            if not p.exists():
+                raise NotFound(f"ISO not found ({what}): {p}")
+            return p
     settings = launcher_data_dir() / "Settings"
     try:
         iso = json.loads(settings.read_text(encoding="utf-8"))["settings"]["isoPath"]
     except (OSError, KeyError, ValueError, TypeError):
-        raise NotFound("No Melee ISO given and none configured in the Slippi Launcher; pass --iso PATH.")
+        raise NotFound("No Melee ISO given and none configured in the Slippi Launcher; pass --iso PATH "
+                       "(or set SLP2ALPHA_ISO).")
     p = Path(iso)
     if not p.exists():
         raise NotFound(f"The ISO configured in the Slippi Launcher does not exist: {p}")
@@ -152,7 +162,8 @@ def find_ffmpeg(explicit: Optional[str] = None, name: str = "ffmpeg") -> str:
             if (Path(c) / name).exists():
                 return str(Path(c) / name)
     raise NotFound(f"{name} not found; install it (macOS: brew install ffmpeg; Windows: winget install Gyan.FFmpeg, "
-                   "or unpack an FFmpeg build's bin folder into packages/ffmpeg) or pass --ffmpeg PATH.")
+                   "or unpack an FFmpeg build's bin folder into packages/ffmpeg; Linux: your distribution's ffmpeg, "
+                   "or a static build's bin folder in ALPHASOLVE_FFMPEG_DIR) or pass --ffmpeg PATH.")
 
 
 def is_apple_silicon() -> bool:

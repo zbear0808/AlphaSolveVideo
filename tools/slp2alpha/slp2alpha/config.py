@@ -101,11 +101,14 @@ def _ishiiruka_inis(scale: int, record: bool, cpu_core: Optional[int], fastmem: 
 
 def default_video_backend() -> Optional[str]:
     """The mainline build's video backend when none is asked for: one that renders without a window.
-    On Windows, Direct3D 11 ("D3D"); "D3D12" and "Vulkan" can run without a window too."""
+    On Windows, Direct3D 11 ("D3D"); "D3D12" and "Vulkan" can run without a window too. On Linux, Vulkan;
+    "OGL" (OpenGL through EGL) is the fallback."""
     if sys.platform == "darwin":
         return "Metal"
     if os.name == "nt":
         return "D3D"
+    if sys.platform.startswith("linux"):
+        return "Vulkan"
     return None  # the build's own default
 
 

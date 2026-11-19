@@ -31,6 +31,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import re
 import shutil
 import statistics
@@ -777,6 +778,8 @@ def main() -> int:
     for p in (c, s, t, b, o, m, r):
         p.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the one set in the Slippi Launcher)")
     args = ap.parse_args()
+    if args.iso:  # for the renders too, which run slp2alpha
+        os.environ["SLP2ALPHA_ISO"] = str(Path(args.iso).expanduser().resolve())
     return args.func(args)
 
 

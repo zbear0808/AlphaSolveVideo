@@ -1,4 +1,4 @@
-"""Command line: python -m slp2alpha {info,render,bench} ... (python3 on macOS, py on Windows)"""
+"""Command line: python -m slp2alpha {info,render,bench} ... (python3 on macOS and Linux, py on Windows)"""
 
 from __future__ import annotations
 
@@ -493,8 +493,8 @@ def main(argv=None) -> int:
                     help="render with the Animelee cel-shaded skins: uses the ISO built by "
                          "tools/animelee/build_iso.py (consider --scale 2 for cleaner outlines)")
     pr.add_argument("--ffmpeg", help="ffmpeg executable (ffprobe is expected next to it)")
-    pr.add_argument("--backend", help="Dolphin's video backend (default: Metal on macOS, D3D on Windows; "
-                                      "also D3D12, Vulkan, OGL where the build has them)")
+    pr.add_argument("--backend", help="Dolphin's video backend (default: Metal on macOS, D3D on Windows, Vulkan "
+                                      "on Linux; also D3D12, Vulkan, OGL where the build has them)")
     pr.add_argument("--dual-core", action=argparse.BooleanOptionalAction, default=None,
                     help="override the playback codes' single-core setting (CPUThread)")
     pr.add_argument("--boot-timeout", type=float, default=120.0)
@@ -522,7 +522,8 @@ def main(argv=None) -> int:
     pb.add_argument("--dual-core", action=argparse.BooleanOptionalAction, default=None,
                     help="override the playback codes' single-core setting (CPUThread)")
     pb.add_argument("--backend", help="video backend, e.g. Metal, D3D, D3D12, Vulkan or OGL (default: Metal on "
-                                      "macOS, D3D on Windows for the mainline build; else the build's default)")
+                                      "macOS, D3D on Windows, Vulkan on Linux for the mainline build; else the "
+                                      "build's default)")
     pb.add_argument("--extra-arg", action="append", default=[], help="extra Dolphin argument")
     pb.add_argument("--code", action="append", default=[], help="extra Gecko code to enable (by name)")
     pb.add_argument("--debug", action="store_true", help="write Dolphin's log file")

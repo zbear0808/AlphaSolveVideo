@@ -21,23 +21,17 @@ Environment:
 from __future__ import annotations
 
 import datetime
-import hashlib
 import os
 import shutil
 import subprocess
 import sys
-import urllib.request
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Optional
 
-REPO = Path(__file__).resolve().parents[2]
-sys.path.insert(0, str(REPO / "tools" / "slp2alpha"))
-from slp2alpha import locate  # noqa: E402
+from mainline_common import (BUILD, CACHE, COMMIT, DOLPHIN_GIT, PATCHES, REPO, RUST, SRC, download, fail, fetch,
+                             ensure_rust, log, run_steps, sha256, tee, venv_tools)
 
-COMMIT = "c5f635948ed43f4d14a72069343e0cecdc117391"  # fix/mainline-playback, 2026-06-15, as build-mac-mainline.sh
-DOLPHIN_GIT = "https://github.com/project-slippi/dolphin.git"
-RUST = "1.88.0"  # Externals/SlippiRustExtensions/rust-toolchain.toml
 # Dolphin's own Windows FFmpeg (the Externals/FFmpeg-bin submodule) can't write Matroska, which slp2alpha records
 # in. This is FFmpeg 8.1, as in the macOS build, from BtbN's builds: a month-end one, which they keep for two years.
 FFMPEG_URL = ("https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/autobuild-2026-10-31-12-59/"
@@ -45,14 +39,9 @@ FFMPEG_URL = ("https://github.com/FFmpeg-Builds/FFmpeg-Builds/releases/download/
 FFMPEG_SHA256 = "5cef7bc48e513f3cee7c881e8b2999d835541edb1846c3e89443a67f8f8556ab"
 FFMPEG_LIBS = ("avcodec", "avformat", "avutil", "swresample", "swscale")  # what Dolphin links
 
-CACHE = locate.cache_root()
-SRC = CACHE / "mainline"
-BUILD = SRC / "build"
-PATCHES = REPO / "tools" / "dolphin-build" / "patches-mainline"
 OUT = Path(os.environ.get("OUTPUT_DIR") or REPO / "packages" / "slippi-playback-mainline")
 FFMPEG_ZIP = CACHE / "downloads" / FFMPEG_URL.rsplit("/", 1)[1]
 FFMPEG = CACHE / "ffmpeg-windows" / FFMPEG_ZIP.stem  # the zip's own top folder: bin\, include\, lib\
-VENV = CACHE / "venv-cmake3"
 EXE = "dolphin-emu-nogui.exe"
 RUST_DLL = "slippi_rust_extensions.dll"
 CMAKE_ARGS = [
@@ -74,103 +63,11 @@ CMAKE_ARGS = [
 ]  # Vulkan stays on (the default): a second backend that runs without a window, besides Direct3D
 
 
-def log(message: str) -> None:
-    print(f"\n== {message}", flush=True)
-
-
-def fail(message: str) -> None:
-    sys.exit(f"ERROR: {message}")
-
-
-def git(*args: str, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(SRC), *args], check=check, capture_output=capture,
-                          encoding="utf-8", errors="replace")
-
-
-def tee(cmd: Sequence, log_file: Path, env: Optional[Dict[str, str]] = None) -> str:
-    """Run a command, showing its output as it comes and keeping a copy in log_file. Returns the output."""
-    print("+ " + " ".join(str(c) for c in cmd), flush=True)
-    lines: List[str] = []
-    with subprocess.Popen([str(c) for c in cmd], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
-                          encoding="utf-8", errors="replace") as proc, \
-            open(log_file, "w", encoding="utf-8") as out:
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            out.write(line)
-            lines.append(line)
-    if proc.returncode:
-        fail(f"{Path(str(cmd[0])).name} exited with {proc.returncode}; the output is in {log_file}")
-    return "".join(lines)
-
-
-# ---------------------------------------------------------------- fetch
-def fetch() -> None:
-    if not (SRC / ".git").exists():
-        log(f"Fetching Slippi mainline Dolphin {COMMIT}")
-        SRC.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["git", "init", "-q", str(SRC)], check=True)
-        git("config", "core.autocrlf", "false")  # the patches and Dolphin's sources are LF
-        git("config", "core.longpaths", "true")
-        git("remote", "add", "origin", DOLPHIN_GIT)
-    if git("rev-parse", "HEAD", check=False, capture=True).stdout.strip() != COMMIT:
-        git("fetch", "-q", "--depth", "1", "origin", COMMIT)
-        git("checkout", "-q", "FETCH_HEAD")
-    # Every submodule but Externals/Qt (378 MB of Windows Qt binaries), which the NoGUI build doesn't use.
-    listed = git("config", "-f", ".gitmodules", "--get-regexp", r"\.path$", capture=True).stdout.split()
-    paths = [p for p in listed[1::2] if p != "Externals/Qt"]
-    git("-c", "core.autocrlf=false", "submodule", "update", "--init", "--recursive", "--depth", "1",
-        "--jobs", "4", "--", *paths)
-    apply_patches()
-
-
-def apply_patches() -> None:
-    """As build-mac-mainline.sh: the patches go on in order, so the tree has the first k of them. The last of
-    those has nothing on top, so it reverse-checks on its own; the rest go on one by one."""
-    patches = sorted(PATCHES.glob("*.patch"))
-    for p in patches:
-        if b"\r\n" in p.read_bytes():
-            fail(f"{p} has Windows (CRLF) line endings, so it won't apply. This checkout predates .gitattributes "
-                 "keeping patches LF: run `git rm --cached -r . && git reset --hard` in the repo (it only "
-                 "rewrites line endings), or clone it again.")
-    applied = 0
-    for i in range(len(patches), 0, -1):
-        if git("apply", "--reverse", "--check", str(patches[i - 1]), check=False, capture=True).returncode == 0:
-            applied = i
-            break
-    for p in patches[:applied]:
-        print(f"already applied: {p.name}")
-    for p in patches[applied:]:
-        log(f"Applying {p.name}")
-        if git("apply", str(p), check=False).returncode != 0:
-            fail(f"{p.name} doesn't apply to {SRC}: it has changes the patches don't expect (an older version "
-                 "of a patch, or edits). Undo them, then run this again:\n"
-                 f'  git -C "{SRC}" checkout -- . && git -C "{SRC}" clean -fd Source && '
-                 f'git -C "{SRC}" submodule foreach --recursive git checkout -- .')
-
-
 # ---------------------------------------------------------------- tools
 def require_windows() -> None:
     if os.name != "nt":
-        fail("this builds the Windows package; on macOS use tools/dolphin-build/build-mac-mainline.sh")
-
-
-def download(url: str, dest: Path) -> None:
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    part = dest.with_name(dest.name + ".part")
-    try:
-        with urllib.request.urlopen(url, timeout=600) as r, open(part, "wb") as f:
-            shutil.copyfileobj(r, f, 1 << 20)
-    except OSError:  # e.g. no CA certificates for Python: curl.exe is part of Windows 10 and later
-        subprocess.run(["curl", "-fL", "--retry", "3", "-o", str(part), url], check=True)
-    part.replace(dest)
-
-
-def sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for block in iter(lambda: f.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
+        fail("this builds the Windows package; on macOS use tools/dolphin-build/build-mac-mainline.sh, "
+             "on Linux tools/dolphin-build/build-linux-mainline.py")
 
 
 def ensure_ffmpeg() -> Path:
@@ -190,28 +87,6 @@ def ensure_ffmpeg() -> Path:
     if not (FFMPEG / "lib" / "avcodec.lib").exists():
         fail(f"{FFMPEG_ZIP.name} doesn't have the expected lib\\avcodec.lib")
     return FFMPEG
-
-
-def cmake_tools() -> Path:
-    """CMake 3.31 and Ninja in a venv (CMake 4 rejects the cmake_minimum_required of some submodules)."""
-    scripts = VENV / "Scripts"
-    if not (scripts / "cmake.exe").exists() or not (scripts / "ninja.exe").exists():
-        log(f"Installing CMake 3.31 and Ninja into {VENV}")
-        subprocess.run([sys.executable, "-m", "venv", str(VENV)], check=True)
-        subprocess.run([str(scripts / "python.exe"), "-m", "pip", "install", "-q", "--disable-pip-version-check",
-                        "cmake>=3.31,<3.32", "ninja"], check=True)
-    return scripts
-
-
-def ensure_rust() -> None:
-    if not shutil.which("rustup"):
-        fail("rustup not found: install Rust from https://rustup.rs")
-    toolchains = subprocess.run(["rustup", "toolchain", "list"], capture_output=True, encoding="utf-8",
-                                errors="replace").stdout
-    if not any(line.startswith(RUST) for line in toolchains.splitlines()):
-        log(f"Installing Rust {RUST}")
-        subprocess.run(["rustup", "toolchain", "install", RUST, "--profile", "minimal", "--component", "rustfmt"],
-                       check=True)
 
 
 def msvc_env() -> Dict[str, str]:
@@ -244,7 +119,7 @@ def msvc_env() -> Dict[str, str]:
 
 def build_env() -> Dict[str, str]:
     env = msvc_env()
-    env["PATH"] = str(cmake_tools()) + os.pathsep + env.get("PATH", "")
+    env["PATH"] = str(venv_tools()) + os.pathsep + env.get("PATH", "")
     # CMakeLists.txt points FFMPEG_DIR at the bundled FFmpeg on Windows, which hides -DFFMPEG_DIR; FindFFmpeg.cmake
     # takes this environment variable instead.
     env["FFMPEG_DIR"] = str(ensure_ffmpeg())
@@ -383,15 +258,5 @@ STEPS = {
 }
 
 
-def main(argv: Sequence[str]) -> int:
-    step = argv[0] if argv else "all"
-    if step not in STEPS or len(argv) > 1:
-        print(f"usage: {Path(__file__).name} [{'|'.join(STEPS)}]", file=sys.stderr)
-        return 2
-    for function in STEPS[step]:
-        function()
-    return 0
-
-
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(run_steps(STEPS, sys.argv[1:], Path(__file__).name))

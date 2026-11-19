@@ -9,6 +9,7 @@ import plistlib
 import re
 import signal
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -130,6 +131,10 @@ def run_dolphin(
     args = dolphin_args(engine, exe, iso, comm_file, user_dir, dump_dir)
     args += list(extra_args or [])
     env = dict(os.environ)
+    if engine == config.MAINLINE and sys.platform.startswith("linux") and not (
+            env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")):
+        # OpenGL's EGL display without a display server (an SSH login, a container), as Dolphin's FifoCI runs it
+        env.setdefault("EGL_PLATFORM", "surfaceless")
     env.update(extra_env or {})
 
     stdout_path = Path(log_dir) / "dolphin.stdout"
