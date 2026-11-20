@@ -7,3 +7,5 @@
 *.sh text eol=lf
 # cmd.exe can misread batch files with LF line endings.
 *.bat text eol=crlf
+# Vendored shaders stay byte for byte as upstream's on every checkout (tools/crt/slang-shaders/MANIFEST).
+tools/crt/slang-shaders/** -text

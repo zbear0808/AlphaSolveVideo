@@ -64,7 +64,8 @@ MODEL_FORMATS = (".blend", ".glb", ".gltf", ".fbx", ".obj", ".stl", ".ply", ".us
 
 
 def _windows_blenders() -> list:
-    """Blender's Windows installs (C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe), newest first."""
+    """Blender's Windows installs (C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe, newest first,
+    then Steam's)."""
     if os.name != "nt":
         return []
     root = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Blender Foundation"
@@ -74,11 +75,26 @@ def _windows_blenders() -> list:
         digits = p.parent.name.replace("Blender", "").strip().split(".")
         return [int(d) if d.isdigit() else 0 for d in digits]
 
-    return [str(p) for p in sorted(found, key=version, reverse=True)]
+    steam = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Steam" / "steamapps" / "common"
+    return [str(p) for p in sorted(found, key=version, reverse=True)] + [str(steam / "Blender" / "blender.exe")]
+
+
+def _unix_blenders() -> list:
+    """Where Blender goes on macOS and Linux besides the PATH: an app in your own Applications folder, an unpacked
+    download linked from ~/.local/bin (which a plain SSH command doesn't put on the PATH), a snap."""
+    if os.name == "nt":
+        return []
+    return [str(Path.home() / "Applications" / "Blender.app" / "Contents" / "MacOS" / "Blender"),
+            str(Path.home() / ".local" / "bin" / "blender"), "/snap/bin/blender"]
 
 
 def find_blender(explicit: Optional[str] = None) -> str:
-    for c in (explicit, os.environ.get("BLENDER"), str(BLENDER_APP), *_windows_blenders(), shutil.which("blender")):
+    for given, what in ((explicit, "--blender"), (os.environ.get("BLENDER"), "BLENDER")):
+        if given:  # an explicit choice must exist: never fall back to another Blender
+            if not Path(given).expanduser().exists():
+                raise locate.NotFound(f"{what}: {given} does not exist")
+            return str(Path(given).expanduser())
+    for c in (str(BLENDER_APP), *_windows_blenders(), shutil.which("blender"), *_unix_blenders()):
         if c and Path(c).exists():
             return str(c)
     raise locate.NotFound("Blender not found: install it, or pass --blender PATH / set BLENDER")

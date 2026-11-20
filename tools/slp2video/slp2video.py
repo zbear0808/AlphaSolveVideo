@@ -10,9 +10,9 @@ It runs, in order, whatever the options ask for:
   2. your 3D model in place of the stage (tools/logo-stage, Blender): as wide as the stage from ledge to ledge,
      its top on the stage's top, seen through the game's camera, still or moving (--static-camera or not);
   3. the composite: the fighters over the model, over a solid colour (--bg-color) or kept transparent;
-  4. the CRT (--crt): CRT Royale's realistic pixels, from the crt-royale project's tools/render_video.py
-     --physical-pixels. Regular Melee is then recorded at its native resolution, the console's own 640x480
-     picture, so that every row of it is one scanline; Animelee at its --scale (2).
+  4. the CRT (--crt): CRT Royale's realistic pixels (tools/crt, the physical-pixels mode of its render_video.py).
+     Regular Melee is then recorded at its native resolution, the console's own 640x480 picture, so that every
+     row of it is one scanline; Animelee at its --scale (2).
 
 The result is one file next to the replay (--out-dir, -o): ProRes 4444 .mov, with alpha unless it's flattened, or
 H.264 .mp4. docs/slp2video.md has the details.
@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -31,17 +30,19 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 HERE = Path(__file__).resolve().parent
 SLP2ALPHA_DIR = HERE.parent / "slp2alpha"
 LOGO_STAGE_DIR = HERE.parent / "logo-stage"
-for _p in (LOGO_STAGE_DIR, SLP2ALPHA_DIR):
+CRT_DIR = HERE.parent / "crt"
+for _p in (CRT_DIR, LOGO_STAGE_DIR, SLP2ALPHA_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 import composite  # noqa: E402
 import plate  # noqa: E402
 import projection  # noqa: E402
+import render_video as crt  # noqa: E402
 import stagedata  # noqa: E402
 from slp2alpha import locate, slp, solve, stages  # noqa: E402
 
@@ -54,12 +55,8 @@ EXAMPLES = """examples:
   slp2video.py ys.slp --shy-guy-sprite mascot.png --bg-color 00ff00 --format mp4
 """
 
-CRT_ROYALE = Path(os.environ.get("CRT_ROYALE_DIR", Path.home() / "Documents" / "touchdesigner" / "crt-royale"))
-CRT_SCRIPT = Path("tools") / "render_video.py"
-CRT_PRESET = Path("upstream") / "slang-shaders" / "crt" / "crt-royale.slangp"
 CRT_ROWS = 2880          # output rows the CRT pass aims for: 6 per scanline of the native 480 lines
-CRT_SEGMENT = 120        # frames per CRT run: each frame is a ~25 MB PNG until its run is encoded
-CRT_MASKS = ("grille", "slot", "shadow")
+CRT_MASKS = tuple(sorted(crt.MASKS))
 PLATE_CACHE = locate.cache_root() / "logo-stage" / "plates"
 MOVING_SAMPLES = 16      # EEVEE samples per frame of a moving-camera plate; a still plate uses the finish's default
 FORMATS = ("mov", "mp4")
@@ -302,122 +299,40 @@ def model_plate(args, plan: Plan, stage_id: int, size: Tuple[int, int], camera_j
 
 
 # ---------------------------------------------------------------- the CRT
-@dataclass
-class CrtTool:
-    python: str
-    script: Path
-    env: Dict[str, str]
-
-
-def find_crt(root: Optional[str], ffmpeg: str) -> CrtTool:
-    """The crt-royale project's offline renderer, the original preset it renders with, and librashader-cli."""
-    base = Path(root).expanduser() if root else CRT_ROYALE
-    script, preset = base / CRT_SCRIPT, base / CRT_PRESET
-    hint = "pass --crt-royale DIR or set CRT_ROYALE_DIR"
-    if not script.exists():
-        raise locate.NotFound(f"--crt needs the crt-royale project's {CRT_SCRIPT}, not found in {base} ({hint})")
-    if not preset.exists():
-        raise locate.NotFound(f"--crt: the CRT Royale preset {preset} is missing (the crt-royale project's pinned "
-                              "slang-shaders clone)")
-    cargo = Path.home() / ".cargo" / "bin" / "librashader-cli"
-    lib = shutil.which("librashader-cli") or (str(cargo) if cargo.exists() else None)
-    if not lib:
-        raise locate.NotFound("--crt needs librashader-cli (cargo install librashader-cli)")
-    venv = base / "tools" / ".venv" / "bin" / "python"
-    path = os.pathsep.join([str(Path(lib).parent), str(Path(ffmpeg).parent), os.environ.get("PATH", "")])
-    return CrtTool(str(venv) if venv.exists() else sys.executable, script, dict(os.environ, PATH=path))
-
-
 def crt_width(height: int) -> int:
     """The picture's width on the tube: Melee draws for a screen 1.2173 times as wide as tall (its camera's
     aspect), which its 640 pixels per line are stretched or squeezed to fill. Even, for the encoders."""
     return 2 * round(height * projection.ASPECT / 2)
 
 
-def crt_encoder(ffmpeg: str, fmt: str, alpha: bool, sample: Path) -> List[str]:
-    """The encoder for the CRT's big frames: Apple's ProRes where it works on this Mac (ten times faster than
-    prores_ks at this size; tried on one frame first), else prores_ks; or H.264 4:4:4 for mp4 (subsampled chroma
-    would smear the phosphor stripes)."""
-    if fmt == "mp4":
-        return ["-c:v", "libx264", "-crf", "12", "-preset", "medium", "-pix_fmt", "yuv444p", "-movflags", "+faststart"]
-    fast = ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "4444", "-pix_fmt", "bgra"]
-    if "prores_videotoolbox" in solve.available_encoders(ffmpeg):
-        with tempfile.TemporaryDirectory(prefix="slp2video-enc-") as tmp:
-            probe = subprocess.run([ffmpeg, "-nostdin", "-y", "-v", "error", "-i", str(sample)] + fast
-                                   + [str(Path(tmp) / "probe.mov")], capture_output=True)
-        if probe.returncode == 0:
-            return fast
-    return ["-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le" if alpha else "yuv444p10le",
-            "-vendor", "apl0"]
+def crt_settings(args, lines: int) -> "crt.Settings":
+    """render_video.py --physical-pixels for a picture `lines` tall, squeezed to Melee's aspect."""
+    return crt.physical_settings(crt_width(lines), lines, args.crt_scale or max(1, round(CRT_ROWS / lines)),
+                                 mask=args.crt_mask, triads_per_pixel=args.crt_triads_per_pixel or 0.0,
+                                 params=args.crt_params or "")
 
 
-def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, ffprobe: str, tool: CrtTool) -> Path:
-    """render_video.py --physical-pixels on the picture, a few seconds at a time. Each frame is a 25 MB PNG, so
-    each batch is fed to one encoder for the whole video as soon as it's rendered, and deleted."""
+def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, ffprobe: str,
+             librashader: str) -> Path:
+    """The picture on the CRT (tools/crt): squeezed to Melee's shape, then each row drawn as one scanline."""
     info = video_info(ffprobe, video)
     lines, rate = info["height"], info["rate"]
     width = crt_width(lines)
-    crt_scale = args.crt_scale or max(1, round(CRT_ROWS / lines))
-    folder = work / "crt"
-    folder.mkdir(parents=True, exist_ok=True)
-    num, _, den = rate.partition("/")
+    settings = crt_settings(args, lines)
     squeeze = f"scale={width}:{lines}:flags=lanczos+accurate_rnd+full_chroma_int"
     if plan.transparent:  # resample colour weighted by alpha, so transparent pixels don't darken the edges
-        squeeze = f"format=gbrap16le,premultiply=inplace=1,{squeeze},unpremultiply=inplace=1"
+        squeeze = f"format=gbrap16le,premultiply=inplace=1,{squeeze},unpremultiply=inplace=1,format=bgra"
     else:
-        squeeze = f"format=gbrp16le,{squeeze}"
-    marks = ",".join(str(f) for f in range(CRT_SEGMENT, info["frames"], CRT_SEGMENT)) or str(info["frames"] + 1)
-    subprocess.run([ffmpeg, "-nostdin", "-y", "-v", "error", "-i", str(video), "-vf",
-                    f"settb={den or 1}/{num},setpts=N,{squeeze}", "-c:v", "ffv1",
-                    "-pix_fmt", "bgra" if plan.transparent else "bgr0", "-f", "segment", "-segment_format", "nut",
-                    "-segment_frames", marks, "-reset_timestamps", "1", str(folder / "in-%04d.nut")], check=True)
-    segments = sorted(folder.glob("in-*.nut"))
-    print(f"CRT: {info['frames']} frames of {width}x{lines} -> {width * crt_scale}x{lines * crt_scale} "
-          f"({crt_scale} px per scanline, {args.crt_mask} mask), in {len(segments)} part(s)")
-    progress = Progress("CRT")
+        squeeze = f"format=gbrp16le,{squeeze},format=bgr0"
+    print(f"CRT: {info['frames']} frames of {width}x{lines} -> {settings.width}x{settings.height} "
+          f"({settings.scale} px per scanline, {args.crt_mask} mask)")
     out.parent.mkdir(parents=True, exist_ok=True)
-    encoder, done = None, 0
-    try:
-        for seg in segments:
-            frames = folder / f"{seg.stem}-frames"
-            cmd = [tool.python, str(tool.script), str(seg), str(frames), "--physical-pixels", "--scale",
-                   str(crt_scale), "--mask", args.crt_mask, "--codec", "png", "--jobs", str(args.crt_jobs),
-                   "--alpha" if plan.transparent else "--no-alpha"]
-            if args.crt_triads_per_pixel:
-                cmd += ["--triads-per-pixel", str(args.crt_triads_per_pixel)]
-            if args.crt_params:
-                cmd += ["--params", args.crt_params]
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8",
-                                    errors="replace", env=tool.env)
-            log = []
-            for line in proc.stdout:
-                log.append(line)
-                m = re.search(r"rendered (\d+)/(\d+)", line)
-                if m:
-                    progress(done + int(m.group(1)), info["frames"])
-            if proc.wait() != 0:
-                raise RuntimeError(f"CRT render of {seg.name} failed:\n{''.join(log[-15:])}")
-            pngs = sorted(frames.glob("*.png"))
-            if encoder is None:
-                codec = crt_encoder(ffmpeg, args.format, plan.transparent, pngs[0])
-                encoder = subprocess.Popen([ffmpeg, "-nostdin", "-y", "-v", "error", "-f", "image2pipe", "-c:v", "png",
-                                            "-framerate", rate, "-i", "pipe:0"] + codec + [str(out)],
-                                           stdin=subprocess.PIPE)
-            try:
-                for png in pngs:
-                    encoder.stdin.write(png.read_bytes())
-            except BrokenPipeError:
-                raise RuntimeError(f"ffmpeg stopped encoding the CRT frames (exit {encoder.wait()})")
-            shutil.rmtree(frames, ignore_errors=True)
-            seg.unlink()
-            done += len(pngs)
-            progress(done, info["frames"])
-        encoder.stdin.close()
-        if encoder.wait() != 0:
-            raise RuntimeError(f"ffmpeg couldn't encode the CRT frames (exit {encoder.returncode})")
-    finally:
-        if encoder is not None and encoder.poll() is None:
-            encoder.kill()
+    _, runtime = crt.render(video, out, settings, ffmpeg=ffmpeg, librashader=librashader, input_size=(width, lines),
+                            rate=rate, prefilter=f"{crt.frame_clock(rate)},{squeeze}", alpha=plan.transparent,
+                            codec="h264-444" if args.format == "mp4" else "prores4444", runtime=args.crt_runtime,
+                            jobs=args.crt_jobs, total=info["frames"], on_progress=Progress("CRT"),
+                            work=work / "crt")
+    print(f"CRT: drawn with librashader's {runtime} runtime")
     got = video_info(ffprobe, out)["frames"]
     if got != info["frames"]:
         print(f"  warning: the CRT video has {got} frames, the picture {info['frames']}", file=sys.stderr)
@@ -479,7 +394,7 @@ def parse(argv: Sequence[str]):
 
     g = ap.add_argument_group("CRT")
     g.add_argument("--crt", action="store_true",
-                   help="finish with CRT Royale's realistic pixels (crt-royale's render_video.py --physical-pixels): "
+                   help="finish with CRT Royale's realistic pixels (tools/crt, its --physical-pixels mode): "
                         "every row of the picture is one scanline. Regular Melee is recorded at its native "
                         "resolution for it, the console's own 640x480 picture")
     g.add_argument("--crt-mask", choices=CRT_MASKS, default="grille",
@@ -490,8 +405,9 @@ def parse(argv: Sequence[str]):
     g.add_argument("--crt-triads-per-pixel", type=float, metavar="N", help="phosphor triads per picture pixel")
     g.add_argument("--crt-params", metavar="K=V,...", help="more CRT Royale parameters, e.g. halation_weight=0.1")
     g.add_argument("--crt-jobs", type=positive, default=4, metavar="N", help="frames the CRT renders at once (default 4)")
-    g.add_argument("--crt-royale", metavar="DIR", help=f"the crt-royale project (default {CRT_ROYALE}; "
-                                                      "or set CRT_ROYALE_DIR)")
+    g.add_argument("--crt-runtime", choices=crt.RUNTIMES, default="auto",
+                   help="librashader's runtime (default: metal on macOS, d3d11 on Windows, wgpu on Linux, then "
+                        "the others the program has)")
 
     g = ap.add_argument_group("the model (--model)")
     g.add_argument("--model-object", action="append", default=[], metavar="NAME",
@@ -524,7 +440,10 @@ def parse(argv: Sequence[str]):
     g.add_argument("--dolphin", help="the headless playback Dolphin (default: the build in packages/)")
     g.add_argument("--iso", help="Melee NTSC 1.02 ISO (default: the Slippi Launcher's)")
     g.add_argument("--ffmpeg", help="ffmpeg (ffprobe is expected next to it)")
-    g.add_argument("--blender", help="Blender (default: /Applications/Blender.app, or BLENDER)")
+    g.add_argument("--blender", help="Blender (default: the usual install places, $BLENDER or the PATH)")
+    g.add_argument("--librashader", metavar="PATH",
+                   help="librashader-cli, for --crt (default: packages/librashader from "
+                        "tools/crt/install_librashader.py, the PATH or ~/.cargo/bin)")
     args = ap.parse_args(argv)
     suffix = Path(args.output).suffix.lower().lstrip(".") if args.output else ""
     if args.format is None:
@@ -534,8 +453,8 @@ def parse(argv: Sequence[str]):
     return args, passthrough
 
 
-def preflight(args, plan: Plan, ffmpeg: str) -> Optional[CrtTool]:
-    """Everything the later steps need, found before the render starts."""
+def preflight(args, plan: Plan) -> Optional[str]:
+    """Everything the later steps need, found before the render starts. Returns librashader-cli for --crt."""
     if plan.model:
         plate.find_blender(args.blender)
         if plan.model == "logo":
@@ -545,7 +464,11 @@ def preflight(args, plan: Plan, ffmpeg: str) -> Optional[CrtTool]:
         plate.check_style(plan.style, plan.model != "logo")
     if plan.sprite and not Path(plan.sprite).expanduser().is_file():
         raise locate.NotFound(f"--shy-guy-sprite: no such file: {plan.sprite}")
-    return find_crt(args.crt_royale, ffmpeg) if plan.crt else None
+    if not plan.crt:
+        return None
+    exe = crt.find_librashader(args.librashader)
+    crt.runtime_candidates(crt.runtimes_of(exe), args.crt_runtime)   # it has the runtime asked for
+    return exe
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -562,7 +485,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"note: {note}", file=sys.stderr)
     ffmpeg = locate.find_ffmpeg(args.ffmpeg)
     ffprobe = locate.find_ffmpeg(args.ffmpeg, name="ffprobe")
-    tool = preflight(args, plan, ffmpeg)
+    librashader = preflight(args, plan)
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else replay.parent
 
     t0 = time.monotonic()
@@ -592,7 +515,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                           fmt="mkv" if plan.crt else args.format, ffmpeg=ffmpeg, ffprobe=ffprobe)
             print(f"composited in {time.monotonic() - t:.0f} s")
         if plan.crt:
-            crt_pass(args, plan, picture, final, work, ffmpeg, ffprobe, tool)
+            crt_pass(args, plan, picture, final, work, ffmpeg, ffprobe, librashader)
         elif picture == video:
             final.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(video), str(final))

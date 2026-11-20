@@ -1,6 +1,6 @@
 # Linux: the whole pipeline on a PC with an NVIDIA GPU
 
-Status: plan, November 2026. Nothing here is implemented yet. It builds on [`plan-linux.md`](plan-linux.md), which is implemented (`427c950`) and runs on the PC in section 2. The measurements were made on that PC in November 2026, with the GTX 1060 still on the nouveau driver. Section 5 repeats them on NVIDIA's driver. The scripts behind them are in [`research/linux-gpu/`](../research/linux-gpu/README.md).
+Status: plan, November 2026. Most of it isn't implemented yet; step 6's code is (section 9.1: the CRT, in `tools/crt`, checked on the Mac and in Docker). It builds on [`plan-linux.md`](plan-linux.md), which is implemented (`427c950`) and runs on the PC in section 2. The measurements were made on that PC in November 2026, with the GTX 1060 still on the nouveau driver. Section 5 repeats them on NVIDIA's driver. The scripts behind them are in [`research/linux-gpu/`](../research/linux-gpu/README.md).
 
 Evidence tags:
 
@@ -19,13 +19,13 @@ Evidence tags:
   - All the camera checks, and the render tests: 38 pass, and 1 is skipped (`--format hevc`, which needs Apple's encoder).
   - Blender 5.2.3 renders the logo plate, still and through the moving camera, and the camera import check passes.
 - **What's missing** [verified]:
-  - The CRT. The PC has neither the crt-royale project nor `librashader-cli`, and the project's `render_video.py` always asks for Metal.
-  - A full `slp2video` run. The composite and the CRT haven't run on Linux yet.
+  - The CRT on the PC: `librashader-cli` isn't installed there yet. The renderer and the shaders it needs are now in this repo (`tools/crt`, section 9.1), and choose Vulkan on Linux.
+  - A full `slp2video` run. The composite and the CRT haven't run on the PC yet.
 - **What limits each step today** (section 3):
   - **Blender** is limited by the GPU, and the GTX 1060 runs at a fraction of its speed: nouveau can't raise its clocks. NVIDIA's driver is installed and loads at the next reboot [verified].
   - **Dolphin** draws on the Intel GPU by default. On the GTX 1060 it's half as fast again, even at nouveau's clocks: 71 game fps against 47 [verified].
   - **The checks and the solver** are limited by the CPU. In a streamed render, the solver's two ProRes encoders take more CPU than everything else together. At `--scale 3`, the checks after Dolphin take almost three times Dolphin's CPU [verified: per-thread CPU].
-  - **The CRT** is limited by starting `librashader-cli` and writing a 25 MB PNG for every frame, then by the ProRes encoder [verified on the Mac; to test on the PC].
+  - **The CRT** is limited by starting `librashader-cli` for every frame, then by the ProRes encoder [verified on the Mac; to test on the PC].
 - **Findings that change the plan** [verified on the PC]:
   - **The solver's ProRes encoder holds renders back.** With FFmpeg's other ProRes encoder, `prores_aw`, in its place, a streamed render of 40 s of a game at `--scale 1` took 56 s instead of 83: 0.72× real time instead of 0.48×. The solver's CPU time fell from 350 s to 113 s.
   - `prores_aw` is 2.2 times as fast as `prores_ks` at 640×528, and 3.9 times at the CRT's 3504×2880, with the alpha within 1/255.
@@ -37,7 +37,7 @@ Evidence tags:
   3. Encoders: `prores_aw` for ProRes, and NVENC for H.264 through FFmpeg 8.1 (section 6).
   4. Cheaper checks after Dolphin (section 7).
   5. One `--gpu` option that puts every step on the chosen GPU (section 8).
-  6. The CRT on Linux: one `librashader-cli` run per frame on Vulkan, as on the Mac. Then a renderer that stays running for the whole video (section 9).
+  6. The CRT on Linux: one `librashader-cli` run per frame, through wgpu on Vulkan (the code is done; it needs a run on the PC). Then a renderer that stays running for the whole video (section 9).
   7. Overlapping the CPU-bound and GPU-bound steps when rendering several replays (section 10).
   8. Running it all from scripts and over SSH (section 11).
 - **Effort.** About 5.5–7 days. Steps 1–6, without the renderer that stays running, take about 3. Steps 3 and 4 don't need the GPU or the reboot, so they can come first; they also speed up Windows, and step 4 the Mac.
@@ -76,7 +76,7 @@ What's installed for this project [verified]:
 | Camera export | Inside Dolphin | Negligible | Nothing |
 | Blender | EEVEE, on the GTX 1060 through OpenGL | The GPU, at nouveau's clocks [verified] | NVIDIA's driver, about twice as fast [estimate] |
 | Composite | ffmpeg's `overlay` and `prores_ks` or `libx264`, on the CPU | The encoder [estimate] | NVENC for `.mp4` |
-| CRT | `librashader-cli` once per frame, on Metal only; PNG files | Starting a process and writing PNGs for each frame [verified on the Mac]; then the encoder: `prores_ks` writes 3.7 frames/s at 3504×2880 [verified] | Vulkan on Linux; one process for all frames; NVENC for `.mp4` |
+| CRT | `librashader-cli` once per frame (`tools/crt`): Metal on macOS, Vulkan on Linux; BMP files | Starting a process for each frame [verified on the Mac]; then the encoder: `prores_ks` writes 3.7 frames/s at 3504×2880 [verified] | One process for all frames; NVENC for `.mp4` |
 
 ### 3.2 Where the CPU goes in a render
 
@@ -236,13 +236,13 @@ Measured on the PC, from a real transparent render, with all 8 threads (`prores_
   - `-c:v h264_nvenc -preset p7 -tune hq -rc vbr -cq 16 -b:v 0`;
   - for the CRT, also `-profile:v high444p -pix_fmt yuv444p`;
   - its speed in 4:4:4 at 3504×2880.
-- **The fallback.** Try the encoder on one frame first, and use `libx264` if it fails. `slp2video.crt_encoder` already does that for Apple's ProRes encoder [verified: `slp2video.py:337–351`].
+- **The fallback.** Try the encoder on one frame first, and use `libx264` if it fails. `render_video.video_encoder` (`tools/crt`) already does that for Apple's ProRes encoder [verified].
 - **Limits.** Consumer cards run only a few encodes at once (8 with current drivers) [reported]. One render needs at most two.
 
 ### 6.4 Where the changes go
 
 - **`solve.ACCELERATED`** holds one faster encoder per format [verified]. It becomes an ordered list per platform: `prores_videotoolbox` on macOS, `prores_aw` elsewhere, then `prores_ks`. The composite already takes its encoders from `solve.encoder_choices` [verified], so it follows.
-- **`slp2video.crt_encoder`** gets the same order for `.mov`, and NVENC before `libx264` for `.mp4`. So does `composite.H264`.
+- **`render_video.video_encoder`** (`tools/crt`), which encodes the CRT, gets the same order for `.mov`, and NVENC before `libx264` for `.mp4`. So does `composite.H264`.
 - **Nothing else changes.** The output names stay the same. Run the render tests with each encoder: they check the solver's transparency.
 
 ## 7. Step 4: cheaper checks after Dolphin
@@ -270,7 +270,7 @@ How each program picks its GPU [verified on the PC unless marked]:
 | Dolphin | OpenGL (EGL) | `__EGL_VENDOR_LIBRARY_FILENAMES=/usr/share/glvnd/egl_vendor.d/10_nvidia.json` [reported: libglvnd] | `DRI_PRIME=pci-0000_00_02_0` [verified], with Mesa's vendor file |
 | Blender | OpenGL, its default | It takes the first EGL device: today nouveau's, even with only Mesa's vendor file [verified]. NVIDIA's vendor file comes first [verified: `10_nvidia.json`], so after the reboot probably the GTX 1060 [to test] | `DRI_PRIME=pci-0000_00_02_0` [verified] |
 | Blender | Vulkan (`--gpu-backend vulkan`) | Picks the discrete GPU itself, even when told otherwise [verified with NVK] | `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.json` [reported] |
-| `librashader-cli` | Vulkan | No device option [verified: its help]. The Vulkan variables above [to test] | The same |
+| `librashader-cli` | wgpu, on Vulkan (its own Vulkan runtime ignores the output size, 9.1) | No device option [verified: its help]. wgpu picks its adapter itself; whether the Vulkan variables above steer it is [to test] | The same |
 | ffmpeg | Vulkan | `-init_hw_device vulkan=vk:NVIDIA`, a part of the device's name [verified] | `vulkan=vk:Intel` [verified] |
 | ffmpeg | NVENC | The only NVIDIA GPU; needs the FFmpeg 8.1 build (6.3) | — |
 
@@ -290,25 +290,31 @@ The option:
 
 ### 9.1 As on the Mac: one `librashader-cli` run per frame
 
-1. **Copy the crt-royale project to the PC.**
-   - It isn't on GitHub [verified: no remote].
-   - Of its 1.9 GB, the CRT pass needs `tools/render_video.py` and `upstream/slang-shaders` (19 MB). `renders/`, `refs/` and the TouchDesigner files can stay behind [verified: their sizes].
-2. **Build `librashader-cli` 0.12.1 with only its Vulkan runtime:** `cargo install librashader-cli --version 0.12.1 --locked --no-default-features --features vulkan`.
-   - Its default features include OpenGL through GLFW, which needs the X11 development packages to build [verified: its `Cargo.toml`].
-   - Rust comes from rustup in the home folder. Or build it in the `asv-linux` image, which has Rust 1.88, and copy the program out [to test: whether 1.88 is new enough].
-   - The program loads `libvulkan.so.1` itself when it runs [estimate: through `ash`'s loader].
-3. **Let `render_video.py` choose the runtime.** It passes `-r metal` today [verified: line 198].
-   - Use `metal` on macOS and `vulkan` elsewhere, or add a `--runtime` option.
-   - This change goes in the crt-royale project.
-   - Update `docs/slp2video.md`, which says the CRT needs macOS.
-4. **Use the faster encoders:** `prores_aw` for `.mov`, 3.9 times `prores_ks`'s speed at this size [verified], and NVENC for `.mp4` (6.3).
-5. **Measure** the time per frame, and the best `--crt-jobs` on 8 threads (it's 4 by default) [to test].
+Done on the Mac and in Docker, November 2026; what's left needs the PC.
+
+1. **The CRT is in this repo now**, [`tools/crt`](../tools/crt/README.md) [verified]:
+   - `render_video.py`, the crt-royale project's script with the same options and settings. On the Mac it gives the original's frames exactly.
+   - The 38 shader files the preset needs (libretro's slang-shaders at `2345ee91`), unmodified, with a manifest of their git blob ids. So the PC doesn't need the crt-royale project.
+2. **Building `librashader-cli` 0.12.1:** `python3 tools/crt/install_librashader.py`, into `packages/librashader/`.
+   - The command planned here, `--no-default-features --features vulkan`, doesn't compile: librashader-cli's `main.rs` imports `librashader::reflect::naga`, which only the wgpu feature turns on [verified: Ubuntu 22.04, Rust 1.88]. So Linux builds `wgpu,vulkan`: 4.5 minutes in Docker on the M1, with `build-essential` only (no X11 packages) [verified].
+   - Rust 1.88, the `asv-linux` image's, is new enough [verified].
+   - The program loads `libvulkan.so.1` itself when it runs [verified: it runs with only `libvulkan1` and a driver installed].
+3. **The runtime.** `render_video.py --runtime auto` uses Metal on macOS and **wgpu**, on Vulkan, on Linux [verified]:
+   - librashader-cli's own Vulkan runtime draws at the input's size, whatever `-d` asks: 640x480 instead of 3840x2880. Its viewport and read-back are sized from the input image (`src/render/vk/mod.rs`) [verified in Docker].
+   - wgpu draws at the right size. On lavapipe its frames are on average 1.0/255 from the Mac's Metal frames (at most 36) [verified].
+   - `render_video.py` checks every frame's size, so a runtime that gets it wrong is skipped, or stops the render.
+   - `tools/crt/linux.Dockerfile` builds and tests all of it on lavapipe; `test_crt.py` includes a real render [verified].
+4. **On the PC** [to test]:
+   - `install_librashader.py`, then `test_crt.py`;
+   - one clip with `slp2video --crt`, on each GPU. wgpu picks its own adapter; whether the Vulkan variables of section 8 steer it is [to test];
+   - the time per frame, and the best `--crt-jobs` on 8 threads (it's 4 by default).
+5. **Use the faster encoders:** `prores_aw` for `.mov`, 3.9 times `prores_ks`'s speed at this size [verified], and NVENC for `.mp4` (6.3). Both go in `render_video.video_encoder`.
 
 ### 9.2 A renderer that stays running
 
 - **Why.**
   - On the Mac a frame takes 0.52 s at 3504×2880, and 0.42 s at 584×480 [verified]. So most of each frame's time is spent starting `librashader-cli` and loading the preset, not drawing.
-  - Each frame is also written as a 25 MB PNG, which ffmpeg reads back before it's deleted [verified: `slp2video.py`].
+  - Each frame is also written as a 40 MB BMP, which ffmpeg reads back before it's deleted [verified: `tools/crt/render_video.py`].
 - **How.** One process loads the preset once:
   1. ffmpeg decodes the composite, and pipes raw frames to the process.
   2. The process draws each frame with librashader's Vulkan runtime, and reads it back.
@@ -316,11 +322,12 @@ The option:
 - **Details:**
   - It passes each frame's number to the shader, as `librashader-cli --frame` does.
   - It reads one frame back while the next one draws.
-  - It takes the same settings as `render_video.py --physical-pixels`: the mask, the triad size, the aspect and any extra parameters.
+  - It takes `render_video.Settings`: the mask, the triad size, the aspect and any extra parameters.
   - Alpha works as in `render_video.py`: the encoding ffmpeg scales up the input's alpha and merges it back (`alphaextract`, `alphamerge`).
+  - It sizes its viewport and read-back from the output, which `librashader-cli`'s Vulkan runtime doesn't (9.1).
 - **Language and place.**
   - Rust, with the `librashader` crate (its `runtime-vk` feature) and `ash`, built like `librashader-cli` [estimate: 300–500 lines].
-  - It can live in this repo (`tools/crt-stream/`) or in the crt-royale project.
+  - In this repo, next to `tools/crt`, which would call it in place of `librashader-cli`.
   - With librashader's Metal runtime, the same program would speed up the Mac too [estimate].
 - **Check:** its frames against `librashader-cli`'s, for each mask, with and without alpha. They should be identical, or within 1/255.
 - **Expected speed.**
@@ -381,7 +388,7 @@ The option:
 | G3 | `prores_aw`, and NVENC for `.mp4` (section 6) | 0.5 day | Anywhere; NVENC on the PC |
 | G4 | Cheaper checks (section 7) | 0.5 day | Anywhere |
 | G5 | `--gpu` (section 8) | 0.5–1 day | The PC |
-| G6 | The CRT, one run per frame on Vulkan (9.1) | 0.5 day | The PC |
+| G6 | The CRT, one run per frame (9.1): code done, `tools/crt`; on the PC, the install, the tests and a clip on each GPU | 0.25 day | The PC |
 | G7 | The CRT renderer that stays running (9.2) | 1.5–2 days | The PC; the Mac for Metal |
 | G8 | Overlapping replays (section 10) | 1 day | Anywhere |
 | G9 | Scripts and SSH (section 11) | 0.25 day | The PC |

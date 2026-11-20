@@ -1,0 +1,57 @@
+# Builds librashader-cli 0.12.1 for the CRT (tools/crt/install_librashader.py) on Windows, Linux and macOS, runs the
+# CRT's tests there, including a real render (test_crt.py's Render: scanlines and phosphor stripes from a grey
+# frame), and uploads each program. Run it by hand: Actions tab > "CRT renderer" > Run workflow, or
+# `gh workflow run crt.yml`. To skip building on a PC, unpack the artifact's librashader-cli into
+# packages/librashader/bin/ (tools/crt/README.md).
+name: CRT renderer
+
+on:
+  workflow_dispatch:
+
+jobs:
+  crt:
+    name: CRT on ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows: Direct3D 11, then wgpu. A runner has no GPU, only Windows' software adapter (WARP). A short
+          # work folder keeps the Rust build's paths under Windows' 260-character limit.
+          - { name: Windows x86_64, runner: windows-2022, cache: 'C:\asv', artifact: librashader-cli-windows-x86_64 }
+          # Linux: wgpu on Vulkan, here Mesa's lavapipe (Vulkan on the CPU)
+          - { name: Linux x86_64, runner: ubuntu-24.04, cache: /tmp/asv, artifact: librashader-cli-linux-x86_64 }
+          - { name: Linux arm64, runner: ubuntu-24.04-arm, cache: /tmp/asv, artifact: librashader-cli-linux-arm64 }
+          # macOS: Metal
+          - { name: macOS arm64, runner: macos-15, cache: /tmp/asv, artifact: librashader-cli-macos-arm64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    env:
+      ALPHASOLVE_CACHE: ${{ matrix.cache }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install Vulkan and Mesa's lavapipe
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libvulkan1 mesa-vulkan-drivers
+      - name: Load the MSVC x64 environment
+        if: runner.os == 'Windows'
+        uses: egor-tensin/vs-shell@v2
+        with:
+          arch: x64
+      - name: Install Rust 1.88.0
+        run: rustup toolchain install 1.88.0 --profile minimal && rustup default 1.88.0
+      - name: Build librashader-cli
+        run: python tools/crt/install_librashader.py
+      - name: Check the vendored shaders
+        run: python tools/crt/vendor_shaders.py check
+      - name: Test, with a real render
+        run: python tools/crt/test_crt.py -v
+      - name: Upload librashader-cli
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}
+          path: packages/librashader/bin
+          if-no-files-found: ignore

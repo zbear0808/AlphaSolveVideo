@@ -11,7 +11,7 @@ python3 tools/slp2video/slp2video.py ys.slp --shy-guy-sprite mascot.png --format
 python3 tools/slp2video/slp2video.py --help                                       # every option
 ```
 
-Needs what `slp2alpha render` needs (the headless Dolphin build, a Melee ISO, ffmpeg); Blender for `--model`; for `--crt` the crt-royale project (`~/Documents/touchdesigner/crt-royale`, or `--crt-royale DIR`) and `librashader-cli`.
+Needs what `slp2alpha render` needs (the headless Dolphin build, a Melee ISO, ffmpeg); Blender for `--model`; for `--crt`, `librashader-cli` 0.12.1 (`python3 tools/crt/install_librashader.py` builds it). The CRT renderer and its shaders are in [`tools/crt`](../crt/README.md).
 
 | File | |
 |---|---|

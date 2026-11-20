@@ -20,7 +20,8 @@ Evidence tags, as in the other plans:
 | 4. The camera export | PC | 0.25–0.5 day | The Windows export equals the Mac's; the checks pass |
 | 5. Render tests and a long game | PC | 0.25 day, plus about an hour of rendering | All entries pass, except `--format hevc` (SKIP) |
 | 6. Write down the results | Anywhere | 0.25 day | The docs say what works on Windows |
-| **Left** | | **1–1.5 days** | |
+| 7. `slp2video`: the model, the composite and the CRT | PC | 0.25–0.5 day | Section 8's checks hold |
+| **Left** | | **1.5–2 days** | |
 
 Already done, so not repeated here [verified]:
 
@@ -144,12 +145,32 @@ Then a path with a space and a non-ASCII character: copy the replay to, for exam
 - **`docs/plan-windows-mainline.md`:** mark steps W2, W3 and W5 done, and resolve its [to test] items.
 - **Optionally,** attach the zip to a GitHub release, because artifacts expire after 90 days.
 
-## 8. Not covered
+## 8. Step 7: `slp2video`: the model, the composite and the CRT
+
+Any time after step 3. Its results go into step 6's docs, and into the Platforms table of [`slp2video.md`](slp2video.md#platforms).
+
+- **Set up:**
+  - Blender 4.4 or newer (section 3). `plate.find_blender` finds it in Program Files or Steam, else pass `--blender`.
+  - `librashader-cli` 0.12.1 for the CRT: `py tools\crt\install_librashader.py`, which builds it with Direct3D 11 and wgpu. It needs Rust (rustup's MSVC toolchain) and Visual Studio's C++ build tools. Or unpack the `librashader-cli-windows-x86_64` artifact of the "CRT renderer" workflow (`.github/workflows/crt.yml`) into `packages\librashader\bin\`.
+- **Checks**, from the repo root:
+
+| What | How to tell | If it doesn't |
+|---|---|---|
+| The CRT draws | `py tools\crt\test_crt.py` passes, `Render` included | Its message names the runtime and what was wrong. Try `--crt-runtime wgpu` |
+| The runtime | `slp2video ... --crt` prints "drawn with librashader's d3d11 runtime" | `auto` falls back to Direct3D 12, wgpu, Vulkan, OpenGL, in that order |
+| The CRT's picture | `py tools\crt\render_video.py IN.mov OUT --physical-pixels --scale 6 --codec png` on a clip, against the Mac's PNGs of the same clip | Linux's lavapipe was 1.0/255 from the Mac on average. Much more than a few levels means a different shader, not floating point |
+| The model, moving camera | `py tools\slp2video\slp2video.py DishonestMuddyCoyote.slp --start-frame 1500 --end-frame 1619 --model statue.glb` writes 120 frames and stands the fighters on the model | Blender's logs are `blender-0.log` and `blender-1.log` in the work folder, which a failure keeps |
+| The composite and H.264 | The same with `--bg-color 00ff00 --format mp4` | |
+| The whole chain | `--model statue.glb --crt` on the same clip | |
+
+- **Watch for:** long paths in the Rust build (keep `ALPHASOLVE_CACHE` short, e.g. `C:\asv`, as the Dolphin workflow does), and virus scanners holding the CRT's frame files, which `render_video.py` deletes as it goes.
+
+## 9. Not covered
 
 | Piece | State |
 |---|---|
 | `research/` probes | Not ported. `shyguy-probe/sprites.py` uses macOS font paths; `animelee/run-matrix.sh` is a shell script |
-| The logo stage on Windows | Its Blender lookup now finds Windows installs, but it's untested there, and its own open findings remain |
+| The logo stage on Windows | Its Blender lookup finds Windows installs (Program Files, Steam); `slp2video --model` is step 7, `logo_stage.py`'s own open findings remain |
 | `slp2alpha bench` | Its CPU sampling is macOS-only and is skipped elsewhere |
 | Ishiiruka (Slippi's official build) through slp2alpha | Its stop by WM_CLOSE is written but untested. It opens a flashing window, so it needs `--allow-window` |
 | Windows on ARM | No build script |
