@@ -78,14 +78,14 @@ Everything `slp2video` runs is in this repo: the render (`tools/slp2alpha`), the
 | Step | macOS | Linux | Windows |
 |---|---|---|---|
 | Render and camera export | Verified | Verified on a PC: Vulkan; the camera export byte-identical to the Mac's ([`plan-linux.md`](plan-linux.md)) | The Dolphin build compiles on GitHub Actions; not run yet |
-| The model in Blender, fixed and moving camera | Verified | Verified on the PC, Blender 5.2.3 | Blender found in Program Files or Steam; not run |
-| Composite | Verified | Not run: ffmpeg only, nothing platform-specific | Not run |
-| CRT | Verified: Metal | Verified in Docker: wgpu on Mesa's lavapipe, 1.0/255 from the Mac's frames on average. Not yet on a GPU | Not run. Direct3D 11 first, then wgpu |
-| `slp2video` itself | Verified | Not run end to end | Not run |
+| The model in Blender, fixed and moving camera | Verified | Verified on the PC, Blender 5.2.3 on the GTX 1060 | Blender found in Program Files or Steam; not run |
+| Composite | Verified | Verified on the PC | Not run |
+| CRT | Verified: Metal | Verified on the PC: wgpu on Vulkan, on the GTX 1060 and the Intel GPU, 0.8 to 0.95/255 from the Mac's frames on average; also in Docker on Mesa's lavapipe | Not run. Direct3D 11 first, then wgpu |
+| `slp2video` itself | Verified | Verified on the PC: a clip with the logo through the moving camera and the CRT | Not run |
 
 Blender is found as given (`--blender`, `$BLENDER`), then in `/Applications` or `~/Applications`, in Program Files or Steam on Windows, on the PATH, in `~/.local/bin` (where a Linux download is often linked, and which an SSH command doesn't put on the PATH) and in `/snap/bin`.
 
-What's left: on Linux, the CRT on the PC's GPU and a whole `slp2video` run ([`plan-linux-gpu.md`](plan-linux-gpu.md), step G6); on Windows, everything after the Dolphin build ([`plan-windows-remaining.md`](plan-windows-remaining.md), step 7 for `slp2video`). `.github/workflows/crt.yml` builds `librashader-cli` and tests the CRT, including a real render, on Windows, Linux and macOS runners, when it's run by hand from the Actions tab.
+What's left: on Linux, speed. The CRT draws on the Intel GPU unless `VK_DRIVER_FILES` names NVIDIA's driver, and on the PC the CPU limits it: each frame's `librashader-cli` run compiles the shaders again, and `prores_ks` is slow on CRT frames ([`plan-linux-gpu.md`](plan-linux-gpu.md), steps G3, G5 and G7). On Windows, everything after the Dolphin build ([`plan-windows-remaining.md`](plan-windows-remaining.md), step 7 for `slp2video`). `.github/workflows/crt.yml` builds `librashader-cli` and tests the CRT, including a real render, on Windows, Linux and macOS runners, when it's run by hand from the Actions tab.
 
 ## Speed
 
