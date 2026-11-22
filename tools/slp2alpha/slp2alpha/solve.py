@@ -46,14 +46,23 @@ FORMATS: Dict[str, OutputFormat] = {
 }
 DEFAULT_FORMAT = "mov"
 
-# Same formats through faster encoders, used when this ffmpeg has them. Apple's ProRes encoder is about
-# twice as fast as prores_ks and matches it within 2/255; allow_sw lets it run where there is no ProRes
-# hardware (plain M1/M2). The alpha map is greyscale, so 4:2:2 HQ loses nothing there.
-ACCELERATED: Dict[str, Tuple[str, OutputFormat]] = {
-    "mov": ("prores_videotoolbox", OutputFormat(
-        ".mov",
-        ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "4444", "-pix_fmt", "bgra"],
-        ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "hq", "-pix_fmt", "p210le"])),
+# Same formats through faster encoders, tried in this order when this ffmpeg has them; the format's own encoder
+# (FORMATS) comes last. Apple's ProRes encoder is about twice as fast as prores_ks and matches it within 2/255;
+# allow_sw lets it run where there is no ProRes hardware (plain M1/M2). prores_aw, FFmpeg's other ProRes encoder,
+# is 2.2 times as fast as prores_ks at 640x528 and 3.9 times at 3504x2880 on a Linux PC, its alpha within 1/255 of
+# prores_ks's (docs/plan-linux-gpu.md 6.2); it takes the profile as a number. The alpha map is greyscale, so 4:2:2
+# HQ loses nothing there.
+ACCELERATED: Dict[str, List[Tuple[str, OutputFormat]]] = {
+    "mov": [
+        ("prores_videotoolbox", OutputFormat(
+            ".mov",
+            ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "4444", "-pix_fmt", "bgra"],
+            ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "hq", "-pix_fmt", "p210le"])),
+        ("prores_aw", OutputFormat(
+            ".mov",
+            ["-c:v", "prores_aw", "-profile:v", "4", "-pix_fmt", "yuva444p10le", "-vendor", "apl0"],
+            ["-c:v", "prores_aw", "-profile:v", "3", "-pix_fmt", "yuv422p10le", "-vendor", "apl0"])),
+    ],
 }
 
 # Dolphin records NTSC fields at 60000/1001 per second; each game frame is shown for two of them.
@@ -133,6 +142,15 @@ OPAQUE_ARGS: Dict[str, List[str]] = {
     "webm": ["-c:v", "libvpx-vp9", "-lossless", "1", "-pix_fmt", "yuv444p"],
     "gif": ["-r", "50"],
 }
+# Faster encoders for them, tried first in this order, as ACCELERATED's. Apple's keeps an alpha plane (bgra), all
+# opaque.
+OPAQUE_ACCELERATED: Dict[str, List[Tuple[str, List[str]]]] = {
+    "mov": [
+        ("prores_videotoolbox", ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "4444",
+                                 "-pix_fmt", "bgra"]),
+        ("prores_aw", ["-c:v", "prores_aw", "-profile:v", "4", "-pix_fmt", "yuv444p10le", "-vendor", "apl0"]),
+    ],
+}
 
 
 def opaque_path(out_dir: Path, name: str, fmt_name: str) -> Path:
@@ -158,7 +176,13 @@ def encode_opaque(ffmpeg: str, video: str, out_dir: Path, name: str, fmt: str = 
     graph += "[out]"
     cmd = [ffmpeg, "-nostdin", "-y", "-v", "error", "-i", video, "-filter_complex", graph, "-map", "[out]"]
     cmd += ["-r", output_rate] if output_rate and not FORMATS[fmt].gif else []
-    subprocess.run(cmd + OPAQUE_ARGS[fmt] + [str(out)], check=True)
+    choices = opaque_choices(ffmpeg, fmt)
+    for i, args in enumerate(choices):
+        done = subprocess.run(cmd + args + [str(out)])
+        if done.returncode == 0:
+            break
+        if i == len(choices) - 1:
+            raise subprocess.CalledProcessError(done.returncode, cmd + args + [str(out)])
     return out
 
 
@@ -174,11 +198,28 @@ def available_encoders(ffmpeg: str) -> FrozenSet[str]:
 
 
 def encoder_choices(ffmpeg: str, fmt: str) -> List[OutputFormat]:
-    """The output format through the fastest available encoder first, then the portable one."""
-    choices = []
-    if fmt in ACCELERATED and ACCELERATED[fmt][0] in available_encoders(ffmpeg):
-        choices.append(ACCELERATED[fmt][1])
-    return choices + [FORMATS[fmt]]
+    """The output format through the available faster encoders first, fastest first, then the portable one."""
+    have = available_encoders(ffmpeg)
+    return [spec for name, spec in ACCELERATED.get(fmt, []) if name in have] + [FORMATS[fmt]]
+
+
+def opaque_choices(ffmpeg: str, fmt: str) -> List[List[str]]:
+    """encoder_choices for a video without alpha: the encoder arguments to try in turn."""
+    have = available_encoders(ffmpeg)
+    return [args for name, args in OPAQUE_ACCELERATED.get(fmt, []) if name in have] + [OPAQUE_ARGS[fmt]]
+
+
+@lru_cache(maxsize=None)
+def encoder_works(ffmpeg: str, args: Tuple[str, ...], size: Tuple[int, int]) -> bool:
+    """Whether these encoder arguments encode a frame of this size here. An encoder can be listed and still fail:
+    NVENC without NVIDIA's driver, or too old a driver for this FFmpeg; Apple's ProRes at some sizes."""
+    try:
+        done = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-f", "lavfi", "-i",
+                               f"color=c=black:s={size[0]}x{size[1]}:d=0.1", "-frames:v", "1", *args, "-f", "null",
+                               "-"], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
 
 
 def missing_encoder(ffmpeg: str, fmt: str) -> Optional[str]:

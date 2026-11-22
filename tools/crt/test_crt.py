@@ -12,6 +12,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -155,6 +156,45 @@ class Frames(unittest.TestCase):
     def test_frame_clock(self):
         self.assertEqual(rv.frame_clock("60000/1001"), "settb=1001/60000,setpts=N")
         self.assertEqual(rv.frame_clock("60"), "settb=1/60,setpts=N")
+
+
+class Encoders(unittest.TestCase):
+    """video_encoder's order, with this machine's encoders and probes replaced: the first faster encoder that's
+    listed and encodes a frame of the size, else the portable one."""
+
+    def pick(self, codec, alpha, have, works=lambda args: True):
+        with mock.patch.object(rv.solve, "available_encoders", return_value=frozenset(have)), \
+                mock.patch.object(rv.solve, "encoder_works", side_effect=lambda f, args, size: works(args)):
+            args = rv.video_encoder("ffmpeg", codec, alpha, (3504, 2880))
+        return args[args.index("-c:v") + 1], args
+
+    def test_prores_order(self):
+        all_three = {"prores_videotoolbox", "prores_aw", "prores_ks"}
+        self.assertEqual(self.pick("prores4444", True, all_three)[0], "prores_videotoolbox")
+        self.assertEqual(self.pick("prores4444", True, {"prores_aw", "prores_ks"})[0], "prores_aw")
+        self.assertEqual(self.pick("prores4444", True, {"prores_ks"})[0], "prores_ks")
+        refuses_apple = lambda args: "prores_videotoolbox" not in args
+        self.assertEqual(self.pick("prores4444", True, all_three, refuses_apple)[0], "prores_aw")
+
+    def test_prores_keeps_alpha_only_when_asked(self):
+        _, with_alpha = self.pick("prores4444", True, {"prores_aw"})
+        _, opaque = self.pick("prores4444", False, {"prores_aw"})
+        self.assertIn("yuva444p10le", with_alpha)
+        self.assertIn("yuv444p10le", opaque)
+        self.assertEqual(self.pick("prores4444", False, {"prores_ks"})[1], rv.solve.OPAQUE_ARGS["mov"])
+
+    def test_h264_nvenc_then_libx264(self):
+        name, args = self.pick("h264-444", False, {"h264_nvenc", "libx264"})
+        self.assertEqual(name, "h264_nvenc")
+        self.assertIn("high444p", args)
+        self.assertEqual(args[-2:], ["-movflags", "+faststart"])
+        self.assertEqual(self.pick("h264-444", False, {"h264_nvenc", "libx264"}, lambda a: "h264_nvenc" not in a)[0],
+                         "libx264")
+        self.assertEqual(self.pick("h264-444", False, {"libx264"})[0], "libx264")
+
+    def test_unknown_codec(self):
+        with self.assertRaises(ValueError):
+            rv.video_encoder("ffmpeg", "vp9", False, (64, 64))
 
 
 def read_bmp(path: Path):

@@ -47,8 +47,10 @@ def encoders(ffmpeg: str, fmt: str, alpha: bool) -> List[List[str]]:
     if fmt == "mkv":
         return [["-c:v", "ffv1", "-pix_fmt", "bgra"] if alpha else solve.OPAQUE_ARGS["mkv"]]
     if fmt == "mov":
-        # the same encoders slp2alpha writes its videos with: Apple's ProRes where there is one, else prores_ks
-        return [spec.video_args for spec in solve.encoder_choices(ffmpeg, "mov")] if alpha else [solve.OPAQUE_ARGS["mov"]]
+        # the same encoders slp2alpha writes its videos with: Apple's ProRes where there is one, prores_aw, then
+        # prores_ks
+        return ([spec.video_args for spec in solve.encoder_choices(ffmpeg, "mov")] if alpha
+                else solve.opaque_choices(ffmpeg, "mov"))
     raise ValueError(f"unknown format {fmt!r}; choose from {', '.join(FORMATS)}")
 
 

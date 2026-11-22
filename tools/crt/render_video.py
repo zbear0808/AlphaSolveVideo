@@ -258,22 +258,37 @@ def has_alpha(ffprobe: str, pix_fmt: str) -> bool:
     return pix_fmt.startswith(("rgba", "bgra", "argb", "abgr", "yuva", "gbrap", "ya", "ayuv"))
 
 
+# H.264 4:4:4 for .mp4: subsampled chroma would smear the phosphor stripes. NVENC first, where it works (NVIDIA's
+# driver, and an FFmpeg whose NVENC API it supports): on a GTX 1060, CRT frames at 3504x2880 went 18.6 frames/s
+# against libx264's 2.6, with a constant QP of 12 scoring at least libx264 CRF 12's quality (SSIM 0.988 against
+# 0.985, PSNR 44.8 dB against 40.4) in files about four times the size (research/crt-in-blender). NVENC's VBR mode
+# capped those files at a fifth of that size and lost detail (SSIM 0.91). H.264 is up to 4096 pixels wide there;
+# the probe on a frame of the real size finds that out.
+H264_444 = [
+    ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-profile:v", "high444p", "-pix_fmt", "yuv444p",
+     "-rc", "constqp", "-qp", "12"],
+    ["-c:v", "libx264", "-crf", "12", "-preset", "medium", "-pix_fmt", "yuv444p"],
+]
+
+
 def video_encoder(ffmpeg: str, codec: str, alpha: bool, size: Tuple[int, int]) -> List[str]:
-    """Encoder arguments: slp2alpha's ProRes 4444, through Apple's encoder where it works at this size (about ten
-    times faster than prores_ks at 3504x2880; tried on a frame first), else prores_ks. H.264 in 4:4:4: subsampled
-    chroma would smear the phosphor stripes."""
+    """Encoder arguments: the first that encodes a frame of this size here. ProRes 4444 as slp2alpha writes it:
+    Apple's encoder (about ten times prores_ks's speed at 3504x2880), prores_aw (about four times), prores_ks.
+    H.264 4:4:4: NVENC, then libx264."""
     if codec == "h264-444":
-        return ["-c:v", "libx264", "-crf", "12", "-preset", "medium", "-pix_fmt", "yuv444p", "-movflags", "+faststart"]
-    if codec != "prores4444":
+        choices = H264_444
+        tail = ["-movflags", "+faststart"]
+    elif codec == "prores4444":
+        choices = ([spec.video_args for spec in solve.encoder_choices(ffmpeg, "mov")] if alpha
+                   else solve.opaque_choices(ffmpeg, "mov"))
+        tail = []
+    else:
         raise ValueError(f"no video encoder for {codec}")
-    name, fast = solve.ACCELERATED["mov"]
-    if name in solve.available_encoders(ffmpeg):
-        probe = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-f", "lavfi", "-i",
-                                f"color=c=black:s={size[0]}x{size[1]}:d=0.1", "-frames:v", "1", *fast.video_args,
-                                "-f", "null", "-"], capture_output=True)
-        if probe.returncode == 0:
-            return fast.video_args
-    return solve.FORMATS["mov"].video_args if alpha else solve.OPAQUE_ARGS["mov"]
+    have = solve.available_encoders(ffmpeg)
+    for args in choices[:-1]:
+        if args[args.index("-c:v") + 1] in have and solve.encoder_works(ffmpeg, tuple(args), tuple(size)):
+            return args + tail
+    return choices[-1] + tail
 
 
 def _tail(path: Path, lines: int = 12) -> str:
