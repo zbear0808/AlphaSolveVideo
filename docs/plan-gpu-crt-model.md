@@ -8,6 +8,8 @@ Decided, 22 November:
 - **The CRT does not run while Blender renders.** Each step finishes before the next starts. The overlapped Blender and CRT of this plan's first version is dropped.
 - **Quality bar for faster settings:** a mean difference of 1/255 or less in the final CRT picture.
 - **On the PC, offer GPU encoding:** NVENC H.264 or HEVC 4:4:4, with transparency as a separate matte file. ProRes 4444 with alpha stays the default.
+- **Separate steps, not one Blender scene.** Blender renders the model, ffmpeg composites, Blender's GPU module draws the CRT, ffmpeg encodes. The fighters are never placed in the 3D scene (section 3.1).
+- **Full-size CRT output stays the default:** 6 rows per scanline, 3504×2880 for regular Melee. `--crt-scale` stays an option for smaller videos (section 9).
 
 Evidence tags, as in the other plans:
 
@@ -81,6 +83,7 @@ A repeated frame flatters `libx264` and NVENC, which predict from the previous f
 | **Blender's own video output** | Slower than today's ffmpeg. Its bundled FFmpeg has ProRes (`prores_ks`, `prores_aw`), but is built with `--disable-nvenc --disable-videotoolbox` on both Linux and macOS [verified: the build flags in both binaries] |
 | **Blender's `gpu` Python module, in the background** | **Works.** In Blender 5.2, `gpu.init()` starts the GPU module in `-b` mode [verified]. Offscreen framebuffers, custom shaders from `GPUShaderCreateInfo`, uniform blocks, sRGB and float textures, and per-texture filter and wrap modes all work there. The frames are then piped to an external ffmpeg |
 | **In the same Blender process as the EEVEE render**, frame by frame | Possible, but that interleaves the CRT with the model's rendering on the GPU, which we decided against. It would save only the 2 ms a frame of files between the steps. Not pursued |
+| **The fighters' video in the 3D scene**, on a plane | Wrong for this picture. The fighters are already a finished, pixel-exact screen image. A textured plane would be resampled by the camera, softened by EEVEE's pixel filter, and passed through Blender's colour management, and the CRT shows every pixel. If the model should ever cover the fighters where it's in front of them, the way to do it is a 2D composite using the plate's depth, not a plane. Not pursued |
 
 ### 3.2 How the prototype works
 
@@ -211,15 +214,16 @@ If L2's accuracy can't be brought within 1/255, swap in `crt-stream` (3.6): 2–
 | The two files of the matte option drift apart in an editor | Same frame count and timestamps. Check in one editor first |
 | 6 GB of video memory | The CRT runs alone now: its framebuffers at 3504×2880 are about 0.5 GB [estimate] |
 
-## 9. Question still open
+## 9. The CRT's size: full size stays the default
 
-**The CRT's size.** Today every CRT video is 3504×2880: 6 output rows for each of the console's 480 scanlines. That's taller than a 4K frame, which has 2160 rows. So if the video ends up on a 4K timeline or on YouTube at 4K, it gets scaled down to 2160 rows, and a quarter of the rows rendered and encoded are thrown away.
+Decided 22 November: the CRT keeps drawing at full size, **6 output rows per scanline: 3504×2880** for regular Melee and for Animelee's 960 rows. Every speed in this plan is measured at that size.
 
-- At 4 rows per scanline (`--crt-scale 4`) it would be 2336×1920. That fits inside 4K with 44% of the pixels, so it's about twice as fast to encode, with half the file size.
-- The phosphor triads stay 3 px wide [verified: `physical_settings`], so each picture pixel gets 1.3 triads instead of 2, a little coarser up close.
-- 5 rows per scanline gives 2920×2400, slightly taller than 4K.
-
-So the question is where these videos end up: a 4K or 1080p upload, or a master to edit at full size? If it's an upload, `--crt-scale 4` (or a `--crt-fit 2160` that picks the scale) could be the default. If it's a master, keep 6.
+- That's taller than a 4K frame (2160 rows). A 4K upload or timeline scales it down, which is fine for a master that's edited at full size.
+- For smaller videos, `--crt-scale` stays an option. At 4 (2336×1920) it has 44% of the pixels and encodes about twice as fast. The phosphor triads stay 3 px wide [verified: `physical_settings`], so each picture pixel gets 1.3 triads instead of 2.
+- Full size matters for the plan in three places:
+  - **Memory:** the CRT's framebuffers at 3504×2880, about 0.5 GB [estimate], fit the GTX 1060's 6 GB, since the CRT runs alone.
+  - **Disk:** ProRes 4444 at this size is about 23 GB a minute [verified: `slp2video.md`]. NVENC HEVC 4:4:4 was 14 MB for 120 frames of a busy clip [verified], about 0.4 GB a minute.
+  - **NVENC's limits:** H.264 goes up to 4096×4096 and HEVC up to 8192×8192 on the GTX 1060 [reported: `plan-linux-gpu.md` 6.3], so 3504×2880 fits both. A larger `--crt-scale` (8 or more: 4672×3840 and up) needs HEVC. `video_encoder` should check that before it picks H.264.
 
 ## References
 
