@@ -129,13 +129,12 @@ def venv_tools(programs: Sequence[str] = ("cmake", "ninja"),
     """The folder of a venv with these programs from pip (CMake 4 rejects the cmake_minimum_required of some
     submodules, hence CMake 3.31). Installs them the first time."""
     bin_dir = VENV / ("Scripts" if os.name == "nt" else "bin")
-    exe = ".exe" if os.name == "nt" else ""
-    if not all((bin_dir / f"{name}{exe}").exists() for name in programs):
+    if not all((bin_dir / locate.exe(name)).exists() for name in programs):
         log(f"Installing {', '.join(programs)} into {VENV}")
         if subprocess.run([sys.executable, "-m", "venv", str(VENV)]).returncode != 0:
             fail(f"couldn't make a venv at {VENV}; on Debian or Ubuntu, install python3-venv")
-        subprocess.run([str(bin_dir / f"python{exe}"), "-m", "pip", "install", "-q", "--disable-pip-version-check",
-                        *requirements], check=True)
+        subprocess.run([str(bin_dir / locate.exe("python")), "-m", "pip", "install", "-q",
+                        "--disable-pip-version-check", *requirements], check=True)
     return bin_dir
 
 

@@ -8,7 +8,7 @@ import platform
 import shutil
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional, Sequence, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 RESOURCES = REPO_ROOT / "Resources"
@@ -17,6 +17,31 @@ PACKAGES = REPO_ROOT / "packages"
 
 class NotFound(RuntimeError):
     pass
+
+
+def exe(name: str) -> str:
+    """A program's file name on this platform: name.exe on Windows."""
+    return name + (".exe" if os.name == "nt" else "")
+
+
+def given_path(*choices: Tuple[Optional[str], str]) -> Optional[Path]:
+    """The first (value, label) choice that's set, e.g. (args.blender, "--blender"). An explicit choice must exist:
+    never fall back to another program."""
+    for given, what in choices:
+        if given:
+            p = Path(given).expanduser()
+            if not p.exists():
+                raise NotFound(f"{what}: {p} does not exist")
+            return p
+    return None
+
+
+def find_first(choices: Sequence[Tuple[Optional[str], str]], candidates: Iterable, missing: str) -> Path:
+    """given_path(*choices), else the first of `candidates` (paths, or None) that exists, else NotFound(missing)."""
+    found = given_path(*choices) or next((Path(c) for c in candidates if c and Path(c).exists()), None)
+    if found is None:
+        raise NotFound(missing)
+    return found
 
 
 def cache_root() -> Path:
@@ -35,8 +60,7 @@ def cache_root() -> Path:
 
 def mainline_package() -> Path:
     """Where the build scripts put the headless mainline build."""
-    name = ("Slippi Dolphin.app" if sys.platform == "darwin" else
-            "dolphin-emu-nogui.exe" if os.name == "nt" else "dolphin-emu-nogui")
+    name = "Slippi Dolphin.app" if sys.platform == "darwin" else exe("dolphin-emu-nogui")
     return PACKAGES / "slippi-playback-mainline" / name
 
 
@@ -70,12 +94,6 @@ def launcher_data_dir() -> Path:
 
 def find_dolphin(explicit: Optional[str] = None) -> Path:
     """The frame-dump-capable playback build. The Launcher's own copy can't record on macOS."""
-    for given, what in ((explicit, "--dolphin"), (os.environ.get("SLP2ALPHA_DOLPHIN"), "SLP2ALPHA_DOLPHIN")):
-        if given:  # an explicit choice must exist: never fall back to a different build
-            p = Path(given).expanduser()
-            if not p.exists():
-                raise NotFound(f"{what}: {p} does not exist")
-            return p
     candidates: List[Path] = []
     if sys.platform == "darwin":
         # Prefer the native headless build (tools/dolphin-build/build-mac-mainline.sh).
@@ -89,10 +107,9 @@ def find_dolphin(explicit: Optional[str] = None) -> Path:
     else:
         # The headless build (tools/dolphin-build/build-linux-mainline.py). The Launcher's AppImage can't record.
         candidates.append(mainline_package())
-    for c in candidates:
-        if c.exists():
-            return c
-    raise NotFound(f"No frame-dump-capable Slippi playback Dolphin found: {build_hint()}, or pass --dolphin PATH.")
+    return find_first(((explicit, "--dolphin"), (os.environ.get("SLP2ALPHA_DOLPHIN"), "SLP2ALPHA_DOLPHIN")),
+                      candidates,
+                      f"No frame-dump-capable Slippi playback Dolphin found: {build_hint()}, or pass --dolphin PATH.")
 
 
 def launcher_playback_app() -> Optional[Path]:
@@ -102,12 +119,9 @@ def launcher_playback_app() -> Optional[Path]:
 
 def find_iso(explicit: Optional[str] = None) -> Path:
     """--iso, else $SLP2ALPHA_ISO (which tools that run slp2alpha set for it), else the Slippi Launcher's setting."""
-    for given, what in ((explicit, "--iso"), (os.environ.get("SLP2ALPHA_ISO"), "SLP2ALPHA_ISO")):
-        if given:
-            p = Path(given).expanduser()
-            if not p.exists():
-                raise NotFound(f"ISO not found ({what}): {p}")
-            return p
+    given = given_path((explicit, "--iso"), (os.environ.get("SLP2ALPHA_ISO"), "SLP2ALPHA_ISO"))
+    if given:
+        return given
     settings = launcher_data_dir() / "Settings"
     try:
         iso = json.loads(settings.read_text(encoding="utf-8"))["settings"]["isoPath"]
@@ -149,11 +163,10 @@ def find_ffmpeg(explicit: Optional[str] = None, name: str = "ffmpeg") -> str:
             p = p.with_name(name + p.suffix)
         if p.exists():
             return str(p)
-    exe = name + (".exe" if os.name == "nt" else "")
     for c in (os.environ.get("ALPHASOLVE_FFMPEG_DIR"), str(PACKAGES / "ffmpeg"),
               str(REPO_ROOT / "packages" / "ffmpeg-6.0-full_build" / "bin")):
-        if c and (Path(c) / exe).exists():
-            return str(Path(c) / exe)
+        if c and (Path(c) / exe(name)).exists():
+            return str(Path(c) / exe(name))
     found = shutil.which(name)
     if found:
         return found

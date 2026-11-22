@@ -44,12 +44,9 @@ def platform_features(platform: str = sys.platform) -> list:
 
 
 def find_cargo() -> str:
-    exe = "cargo.exe" if os.name == "nt" else "cargo"
-    for c in (shutil.which("cargo"), Path.home() / ".cargo" / "bin" / exe):
-        if c and Path(c).exists():
-            return str(c)
-    raise locate.NotFound("cargo not found: install Rust from https://rustup.rs (on Windows also Visual Studio's "
-                          "C++ build tools), then run this again")
+    return str(locate.find_first((), (shutil.which("cargo"), Path.home() / ".cargo" / "bin" / locate.exe("cargo")),
+                                 "cargo not found: install Rust from https://rustup.rs (on Windows also Visual "
+                                 "Studio's C++ build tools), then run this again"))
 
 
 def main(argv=None) -> int:

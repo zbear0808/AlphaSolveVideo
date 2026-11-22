@@ -89,15 +89,9 @@ def _unix_blenders() -> list:
 
 
 def find_blender(explicit: Optional[str] = None) -> str:
-    for given, what in ((explicit, "--blender"), (os.environ.get("BLENDER"), "BLENDER")):
-        if given:  # an explicit choice must exist: never fall back to another Blender
-            if not Path(given).expanduser().exists():
-                raise locate.NotFound(f"{what}: {given} does not exist")
-            return str(Path(given).expanduser())
-    for c in (str(BLENDER_APP), *_windows_blenders(), shutil.which("blender"), *_unix_blenders()):
-        if c and Path(c).exists():
-            return str(c)
-    raise locate.NotFound("Blender not found: install it, or pass --blender PATH / set BLENDER")
+    return str(locate.find_first(((explicit, "--blender"), (os.environ.get("BLENDER"), "BLENDER")),
+                                 (BLENDER_APP, *_windows_blenders(), shutil.which("blender"), *_unix_blenders()),
+                                 "Blender not found: install it, or pass --blender PATH / set BLENDER"))
 
 
 def find_project(explicit: Optional[str] = None) -> Path:

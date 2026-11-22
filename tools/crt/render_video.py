@@ -35,6 +35,7 @@ import argparse
 import collections
 import concurrent.futures as cf
 import functools
+import itertools
 import json
 import os
 import re
@@ -46,7 +47,7 @@ import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Callable, Dict, Iterator, List, Optional, Sequence, Tuple
 
 HERE = Path(__file__).resolve().parent
 if str(HERE.parent / "slp2alpha") not in sys.path:
@@ -77,12 +78,11 @@ class CrtError(RuntimeError):
 
 
 # ---------------------------------------------------------------- librashader-cli
-def exe_name() -> str:
-    return "librashader-cli.exe" if os.name == "nt" else "librashader-cli"
+EXE = locate.exe("librashader-cli")
 
 
 def package_exe() -> Path:
-    return LIBRASHADER_PACKAGE / "bin" / exe_name()
+    return LIBRASHADER_PACKAGE / "bin" / EXE
 
 
 def install_hint() -> str:
@@ -91,16 +91,9 @@ def install_hint() -> str:
 
 def find_librashader(explicit: Optional[str] = None) -> str:
     """librashader-cli: as given, LIBRASHADER_CLI, packages/librashader/bin, the PATH, then ~/.cargo/bin."""
-    for given, what in ((explicit, "--librashader"), (os.environ.get("LIBRASHADER_CLI"), "LIBRASHADER_CLI")):
-        if given:  # an explicit choice must exist: never fall back to another program
-            p = Path(given).expanduser()
-            if not p.exists():
-                raise locate.NotFound(f"{what}: {p} does not exist")
-            return str(p)
-    for c in (package_exe(), shutil.which("librashader-cli"), Path.home() / ".cargo" / "bin" / exe_name()):
-        if c and Path(c).exists():
-            return str(c)
-    raise locate.NotFound(f"librashader-cli not found: {install_hint()}")
+    return str(locate.find_first(((explicit, "--librashader"), (os.environ.get("LIBRASHADER_CLI"), "LIBRASHADER_CLI")),
+                                 (package_exe(), shutil.which("librashader-cli"), Path.home() / ".cargo" / "bin" / EXE),
+                                 f"librashader-cli not found: {install_hint()}"))
 
 
 _RUNTIME_VALUES = re.compile(r"--runtime <RUNTIME>.*?\[possible values: ([^\]]+)\]", re.S)
@@ -266,22 +259,21 @@ def has_alpha(ffprobe: str, pix_fmt: str) -> bool:
 
 
 def video_encoder(ffmpeg: str, codec: str, alpha: bool, size: Tuple[int, int]) -> List[str]:
-    """Encoder arguments. ProRes 4444 through Apple's encoder where it works at this size (about ten times faster
-    than prores_ks at 3504x2880; tried on a frame first), else prores_ks. H.264 in 4:4:4: subsampled chroma would
-    smear the phosphor stripes."""
+    """Encoder arguments: slp2alpha's ProRes 4444, through Apple's encoder where it works at this size (about ten
+    times faster than prores_ks at 3504x2880; tried on a frame first), else prores_ks. H.264 in 4:4:4: subsampled
+    chroma would smear the phosphor stripes."""
     if codec == "h264-444":
         return ["-c:v", "libx264", "-crf", "12", "-preset", "medium", "-pix_fmt", "yuv444p", "-movflags", "+faststart"]
     if codec != "prores4444":
         raise ValueError(f"no video encoder for {codec}")
-    fast = ["-c:v", "prores_videotoolbox", "-allow_sw", "1", "-profile:v", "4444", "-pix_fmt", "bgra"]
-    if "prores_videotoolbox" in solve.available_encoders(ffmpeg):
+    name, fast = solve.ACCELERATED["mov"]
+    if name in solve.available_encoders(ffmpeg):
         probe = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-f", "lavfi", "-i",
-                                f"color=c=black:s={size[0]}x{size[1]}:d=0.1", "-frames:v", "1"] + fast
-                               + ["-f", "null", "-"], capture_output=True)
+                                f"color=c=black:s={size[0]}x{size[1]}:d=0.1", "-frames:v", "1", *fast.video_args,
+                                "-f", "null", "-"], capture_output=True)
         if probe.returncode == 0:
-            return fast
-    return ["-c:v", "prores_ks", "-profile:v", "4", "-pix_fmt", "yuva444p10le" if alpha else "yuv444p10le",
-            "-vendor", "apl0"]
+            return fast.video_args
+    return solve.FORMATS["mov"].video_args if alpha else solve.OPAQUE_ARGS["mov"]
 
 
 def _tail(path: Path, lines: int = 12) -> str:
@@ -361,8 +353,8 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
     candidates = runtime_candidates(runtimes_of(librashader), runtime)
     folder = Path(work) if work else Path(tempfile.mkdtemp(prefix="crt-"))
     frames_in, frames_out = folder / "in", folder / "out"
-    frames_in.mkdir(parents=True, exist_ok=True)
-    frames_out.mkdir(parents=True, exist_ok=True)
+    for d in (frames_in, frames_out):
+        d.mkdir(parents=True, exist_ok=True)
     # PNGs without alpha to merge come straight from librashader-cli, which compresses them `jobs` at a time
     # (ffmpeg's PNG encoder would do them one by one). Everything else goes to the encoder as BMPs.
     direct = codec == "png" and not alpha
@@ -371,6 +363,9 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
 
     def drawn_path(i: int) -> Path:
         return Path(out) / f"{i + 1:06d}.png" if direct else frames_out / f"{i:06d}.bmp"
+
+    def log(name: str) -> str:
+        return _tail(folder / f"{name}.log")
 
     width, height = input_size
     frame_size = width * height * 3
@@ -386,17 +381,19 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
     done = 0
     ok = False
     try:
-        def read(i: int) -> Optional[Path]:
-            data = decoder.stdout.read(frame_size)
-            if len(data) < frame_size:
-                return None
-            path = frames_in / f"{i:06d}.bmp"
-            path.write_bytes(bmp_bytes(data, width, height))
-            return path
+        def decoded() -> Iterator[Path]:
+            for i in itertools.count():
+                data = decoder.stdout.read(frame_size)
+                if len(data) < frame_size:
+                    return
+                path = frames_in / f"{i:06d}.bmp"
+                path.write_bytes(bmp_bytes(data, width, height))
+                yield path
 
-        first = read(0)
+        frames = decoded()
+        first = next(frames, None)
         if first is None:
-            raise CrtError(f"ffmpeg decoded no frames from {src}: {_tail(folder / 'decode.log')}")
+            raise CrtError(f"ffmpeg decoded no frames from {src}: {log('decode')}")
         chosen = pick_runtime(librashader, preset, settings, first, drawn_path(0), candidates)
 
         if not direct:
@@ -424,41 +421,31 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
                                        stdout=subprocess.DEVNULL, stderr=enc_log)
 
         def finish(path: Path) -> None:
-            if encoder is None:
-                return  # a PNG of the sequence: it stays
-            try:
-                encoder.stdin.write(path.read_bytes())
-            except (BrokenPipeError, OSError):
-                raise CrtError(f"ffmpeg stopped encoding (exit {encoder.wait()}): {_tail(folder / 'encode.log')}")
-            _drop(path)
-
-        finish(drawn_path(0))
-        done = 1
-        if on_progress:
-            on_progress(done, total)
-        inflight: collections.deque = collections.deque()
-        index, eof = 1, False
-        while True:
-            while not eof and len(inflight) < 2 * jobs:
-                path = read(index)
-                if path is None:
-                    eof = True
-                    break
-                inflight.append(pool.submit(draw, librashader, chosen, preset, settings, path, drawn_path(index)))
-                index += 1
-            if not inflight:
-                break
-            finish(inflight.popleft().result())
+            nonlocal done
+            if encoder is not None:  # else a PNG of the sequence: it stays
+                try:
+                    encoder.stdin.write(path.read_bytes())
+                except (BrokenPipeError, OSError):
+                    raise CrtError(f"ffmpeg stopped encoding (exit {encoder.wait()}): {log('encode')}")
+                _drop(path)
             done += 1
             if on_progress:
                 on_progress(done, total)
+
+        finish(drawn_path(0))
+        inflight: collections.deque = collections.deque()
+        for i, path in enumerate(frames, 1):   # up to 2 * jobs frames decoded or drawing at once
+            inflight.append(pool.submit(draw, librashader, chosen, preset, settings, path, drawn_path(i)))
+            if len(inflight) >= 2 * jobs:
+                finish(inflight.popleft().result())
+        while inflight:
+            finish(inflight.popleft().result())
         if encoder is not None:
             encoder.stdin.close()
             if encoder.wait() != 0:
-                raise CrtError(f"ffmpeg couldn't encode the CRT frames (exit {encoder.returncode}): "
-                               f"{_tail(folder / 'encode.log')}")
+                raise CrtError(f"ffmpeg couldn't encode the CRT frames (exit {encoder.returncode}): {log('encode')}")
         if decoder.wait() != 0:
-            raise CrtError(f"ffmpeg couldn't decode {src} (exit {decoder.returncode}): {_tail(folder / 'decode.log')}")
+            raise CrtError(f"ffmpeg couldn't decode {src} (exit {decoder.returncode}): {log('decode')}")
         ok = True
         return done, chosen
     finally:
