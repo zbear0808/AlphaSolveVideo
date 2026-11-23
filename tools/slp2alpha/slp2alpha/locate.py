@@ -179,5 +179,41 @@ def find_ffmpeg(explicit: Optional[str] = None, name: str = "ffmpeg") -> str:
                    "or a static build's bin folder in ALPHASOLVE_FFMPEG_DIR) or pass --ffmpeg PATH.")
 
 
+BLENDER_APP = Path("/Applications/Blender.app/Contents/MacOS/Blender")
+
+
+def _windows_blenders() -> list:
+    """Blender's Windows installs (C:\\Program Files\\Blender Foundation\\Blender 5.2\\blender.exe, newest first,
+    then Steam's)."""
+    if os.name != "nt":
+        return []
+    root = Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Blender Foundation"
+    found = [p for p in root.glob("Blender*/blender.exe") if p.is_file()]
+
+    def version(p: Path):
+        digits = p.parent.name.replace("Blender", "").strip().split(".")
+        return [int(d) if d.isdigit() else 0 for d in digits]
+
+    steam = Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")) / "Steam" / "steamapps" / "common"
+    return [str(p) for p in sorted(found, key=version, reverse=True)] + [str(steam / "Blender" / "blender.exe")]
+
+
+def _unix_blenders() -> list:
+    """Where Blender goes on macOS and Linux besides the PATH: an app in your own Applications folder, an unpacked
+    download linked from ~/.local/bin (which a plain SSH command doesn't put on the PATH), a snap."""
+    if os.name == "nt":
+        return []
+    return [str(Path.home() / "Applications" / "Blender.app" / "Contents" / "MacOS" / "Blender"),
+            str(Path.home() / ".local" / "bin" / "blender"), "/snap/bin/blender"]
+
+
+def find_blender(explicit: Optional[str] = None) -> str:
+    """Blender: as given, $BLENDER, /Applications, Program Files or Steam, the PATH, ~/Applications, ~/.local/bin,
+    /snap/bin."""
+    return str(find_first(((explicit, "--blender"), (os.environ.get("BLENDER"), "BLENDER")),
+                          (BLENDER_APP, *_windows_blenders(), shutil.which("blender"), *_unix_blenders()),
+                          "Blender not found: install it, or pass --blender PATH / set BLENDER"))
+
+
 def is_apple_silicon() -> bool:
     return sys.platform == "darwin" and platform.machine() == "arm64"
