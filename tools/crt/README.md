@@ -17,7 +17,7 @@ python3 tools/crt/test_crt.py                                                  #
 - **Frames stream through.** One ffmpeg decodes the video, and the frames go to `librashader-cli` as they come, 4 at a time (`--jobs`). A second ffmpeg encodes them in order as they're drawn. Only the frames in flight are on disk, as BMP files: no PNG compression, which made each frame 0.1 s slower to write and slower again to read back. 150 frames at 3504x2880 with alpha took 30 s instead of 50 on an M1, with identical output.
 - **Alpha follows the picture's framing.** The alpha goes through the same filters as the colour. The original took it from the unframed input, which only mattered in standard mode.
 - **Only Python's standard library.** ffmpeg is found the way slp2alpha finds it.
-- **H.264** (`--codec h264-444`) is CRF 12 at the medium preset, as `slp2video` writes it (the original: CRF 10, slow). ProRes uses Apple's encoder where it works (tried on one frame first), else `prores_ks`.
+- **H.264** (`--codec h264-444`): NVENC where it works (`h264_nvenc` 4:4:4 at a constant QP of 12), else `libx264` at CRF 12, medium preset, as `slp2video` writes it (the original: CRF 10, slow). **ProRes**: Apple's encoder, then `prores_aw`, then `prores_ks`. Each faster encoder is tried on one frame of the real size first, so a missing driver or a frame too wide for it (H.264 on NVENC stops at 4096 pixels) falls through to the next.
 
 ## librashader-cli
 

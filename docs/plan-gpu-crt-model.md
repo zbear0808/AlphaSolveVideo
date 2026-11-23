@@ -149,16 +149,31 @@ If the accuracy gap can't be closed, the other way to keep the preset loaded is 
 - **`--crt` then needs Blender,** even without a model. `librashader-cli` stays as the fallback when there's no Blender, and as the reference in the tests.
 - **We maintain the chain's logic,** about 300 lines. It follows librashader 0.12.1. The shaders themselves still come from librashader's compiler, so they don't drift.
 
-## 4. Encoders on the PC
+## 4. Encoders on the PC (L1: done, 22 November)
 
-- **Install BtbN's FFmpeg 8.1 build** beside the 9.0 build, for the NVENC encodes. Or make it the PC's only FFmpeg after a run of the render tests (`plan-linux-gpu.md` 6.3).
-- **`render_video.video_encoder`:**
-  - `.mov`: Apple's ProRes on the Mac, `prores_aw` elsewhere, `prores_ks` last;
-  - `.mp4`: `h264_nvenc` or `hevc_nvenc` 4:4:4 when they open on one frame, else `libx264`.
-- **Quality to check against `libx264`** at the same size, with SSIM, on real CRT frames [to test]:
-  - `h264_nvenc -preset p5 -tune hq -profile:v high444p -pix_fmt yuv444p -rc vbr -cq 16`;
-  - `hevc_nvenc` with `-profile:v rext`, which also gives smaller files: 14 MB against 37 MB for the same 120 frames [verified].
-- **The matte (decision 4):** with `--format mp4` and transparency, write `NAME.mp4` and `NAME matte.mp4`, the alpha as a grey video. Also NVENC: 8.4 frames/s for both together [verified].
+- **FFmpeg 8.1.** BtbN's month-end build `ffmpeg-n8.1.3-27-g8dca1586f4-linux64-gpl-8.1.tar.xz` (SHA-256 `41e9c565…3380`, as pinned in `plan-linux-gpu.md` 6.3) is the PC's `packages/ffmpeg/` now. Its NVENC runs on driver 580 [verified]. The 9.0 build is kept in `packages/ffmpeg-9.0/`.
+- **The encoder order** (`solve.ACCELERATED`, `solve.OPAQUE_ACCELERATED`, `render_video.video_encoder`) [verified: unit tests in `test_crt.py`; on the PC and the Mac]:
+  - `.mov`: Apple's ProRes, then `prores_aw`, then `prores_ks`, for the solver, `--keep-background`, the composite and the CRT;
+  - the CRT's `.mp4`: `h264_nvenc` 4:4:4, then `libx264`.
+
+  Each faster encoder is tried on one frame of the real size first. So on the PC a frame wider than NVENC's 4096 pixels (`--crt-scale 8` and up) falls back to `libx264` [verified].
+- **NVENC's settings,** from 60 real CRT frames at 3504×2880 on the GTX 1060, against the drawn frames [verified]:
+
+  | Encoder | Frames/s | Size | SSIM | PSNR |
+  |---|---|---|---|---|
+  | `libx264 -crf 12 -preset medium` (today) | 2.6 | 41 MB | 0.985 | 40.4 dB |
+  | `h264_nvenc -rc vbr -cq 10…16 -b:v 0` | 20 | 20 MB, whatever the CQ | 0.911 | 33.9 dB |
+  | `h264_nvenc -rc constqp -qp 16` | 20.3 | 109 MB | 0.977 | 41.7 dB |
+  | `h264_nvenc -rc constqp -qp 13` | 18.5 | 147 MB | 0.984 | 43.8 dB |
+  | **`h264_nvenc -rc constqp -qp 12`** (chosen) | 18.6 | 170 MB | 0.988 | 44.8 dB |
+  | `hevc_nvenc -rc constqp -qp 16` | 27.1 | 101 MB | 0.990 | 44.2 dB |
+
+  - NVENC's VBR mode stops at a bit rate of its own, whatever the CQ asks for, and loses the stripes. Constant QP doesn't.
+  - QP 12 is the lightest setting at least as good as `libx264` on both measures. It's seven times `libx264`'s speed, in files four times the size: about 10 GB a minute, against ProRes's 23.
+  - `hevc_nvenc` at QP 16 would be better again, faster, and smaller. But `.mp4` has always been H.264, so it stays H.264 for now. HEVC could be an option later [to decide].
+- **Not changed:** the composite's own `.mp4` (640×528, 4:2:0, `libx264`). At that size `libx264` is fast, and the composite is a small part of a run.
+- **The render tests on the PC** with FFmpeg 8.1, `prores_aw` in the solver and the composite, and the encoder order above: 38 pass, 1 skipped (`--format hevc`, which needs macOS), as before with 9.0 and `prores_ks` [verified, 22 November]. Their speeds aren't compared here, because another render shared the PC during the run.
+- **The matte (decision 4)** is step L3: with `--format mp4` and transparency, write `NAME.mp4` and `NAME matte.mp4`, the alpha as a grey video. NVENC manages 8.4 frames/s for both together, behind the Blender CRT [verified].
   - Resolve, Premiere and Final Cut can use a luma matte [reported].
   - Check that the two files line up frame for frame in one editor [to test].
 

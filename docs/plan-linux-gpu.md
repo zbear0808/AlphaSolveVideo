@@ -391,11 +391,11 @@ Done: on the Mac, in Docker, and on the PC on 20 November (item 4).
 |---|---|---|---|
 | G1 | Reboot, then run `gpu_check.sh` (section 4) | 0.1 day | The PC; the reboot needs its owner |
 | G2 | Measure again (section 5) | 0.5 day | The PC |
-| G3 | `prores_aw`, and NVENC for `.mp4` (section 6) | 0.5 day | Anywhere; NVENC on the PC |
+| G3 | `prores_aw`, and NVENC for `.mp4` (section 6): done, 22 November, for the solver, the composite's `.mov` and the CRT; FFmpeg 8.1 is the PC's FFmpeg ([`plan-gpu-crt-model.md`](plan-gpu-crt-model.md) section 4) | 0.5 day | Anywhere; NVENC on the PC |
 | G4 | Cheaper checks (section 7) | 0.5 day | Anywhere |
 | G5 | `--gpu` (section 8) | 0.5–1 day | The PC |
 | G6 | The CRT, one run per frame (9.1): done, 20 November | — | The PC |
-| G7 | The CRT renderer that stays running (9.2) | 1.5–2 days | The PC; the Mac for Metal |
+| G7 | The CRT renderer that stays running (9.2): replaced by the CRT inside Blender, [`plan-gpu-crt-model.md`](plan-gpu-crt-model.md) step L2 | 1.5–2 days | The PC; the Mac for Metal |
 | G8 | Overlapping replays (section 10) | 1 day | Anywhere |
 | G9 | Scripts and SSH (section 11) | 0.25 day | The PC |
 | G10 | Docs: `slp2video.md`, a Linux quick start in the README, `plan-linux.md`'s results, this plan's status | 0.25 day | Anywhere |
