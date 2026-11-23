@@ -544,6 +544,20 @@ def configure_render(sc, job):
     r.filepath = job["out"]
     if hasattr(sc, "compositing_node_group"):
         sc.compositing_node_group = None   # the project's own render script adds a glow pass in memory; not wanted here
+    apply_eevee_overrides(sc, job.get("eevee") or {})
+
+
+def apply_eevee_overrides(sc, overrides):
+    """Job key `eevee`: EEVEE settings to set last, by name (`use_shadows`, `shadow_resolution_scale`, ...); names
+    starting `ray_tracing_options.` go to the ray-tracing options. For measuring what each setting costs."""
+    ee = sc.eevee
+    for name, value in overrides.items():
+        target, attr = (ee.ray_tracing_options, name.split(".", 1)[1]) if name.startswith("ray_tracing_options.") \
+            else (ee, name)
+        if not hasattr(target, attr):
+            raise ValueError(f"EEVEE has no setting {name}")
+        setattr(target, attr, value)
+        log("eevee", name, "=", value)
 
 
 def import_moving_camera(sc, path, mapping):
