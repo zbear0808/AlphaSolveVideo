@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""CRT Royale on a video: the original shader, rendered by librashader-cli, on macOS, Windows and Linux.
+"""CRT Royale on a video: the original shader, drawn by Blender's GPU module or by librashader-cli, on macOS, Windows
+and Linux.
 
     python3 tools/crt/render_video.py IN OUT [options]
     python3 tools/crt/render_video.py in.mp4 out.mov --physical-pixels
@@ -9,10 +10,13 @@ The crt-royale TouchDesigner project's tools/render_video.py, brought into this 
 same settings, and:
 
   - the shader preset is here (slang-shaders/: libretro's at 2345ee91, the files crt-royale needs, unmodified);
-  - librashader's runtime suits the platform: Metal on macOS, Direct3D 11 on Windows, wgpu on Vulkan on Linux
-    (--runtime; librashader-cli's own Vulkan runtime ignores the size it's asked for);
-  - the frames stream through: each goes to librashader-cli as soon as it's decoded and to the encoder as soon as
-    it's drawn, so only the frames in flight are on disk, as BMP files (no PNG compression on either side).
+  - on macOS and Linux, Blender draws it where Blender is found (--runtime blender, blender_crt.py): the preset as
+    librashader-cli compiles it (blender-chain/), in one process for the whole video, its frames 0.003/255 from
+    librashader-cli's. ffmpeg's decoded frames go to it, and its drawn frames to the encoding ffmpeg, through pipes;
+  - otherwise librashader-cli draws each frame, in a runtime that suits the platform: Metal on macOS, Direct3D 11
+    on Windows, wgpu on Vulkan on Linux (librashader-cli's own Vulkan runtime ignores the size it's asked for). The
+    frames stream through: each goes to librashader-cli as soon as it's decoded and to the encoder as soon as it's
+    drawn, so only the frames in flight are on disk, as BMP files.
 
   Standard mode (retro console emulation):
     video -> ffmpeg (fit to N x N "console signal", default 288) -> crt-royale -> ffmpeg (4:4:4) -> movie
@@ -25,8 +29,8 @@ same settings, and:
   Codecs: prores4444 (default, .mov, QuickTime-friendly, full chroma), h264-444 (.mp4, VLC/ffplay),
   png (a numbered PNG sequence in a folder).
 
-It needs ffmpeg and librashader-cli 0.12.1 (python3 tools/crt/install_librashader.py). Python's standard library
-is enough: no numpy or Pillow.
+It needs ffmpeg, and Blender 5.2 (macOS, Linux) or librashader-cli 0.12.1 (python3 tools/crt/install_librashader.py).
+Python's standard library is enough here: no numpy or Pillow (blender_crt.py uses Blender's own numpy).
 """
 
 from __future__ import annotations
@@ -70,7 +74,15 @@ RUNTIME_ORDER = {
     "win32": ("d3d11", "d3d12", "wgpu", "vulkan", "opengl4"),
     "linux": ("wgpu", "vulkan", "opengl4"),
 }
-RUNTIMES = ("auto", "metal", "d3d11", "d3d12", "d3d9", "vulkan", "wgpu", "opengl4", "opengl3")
+# CRT Royale drawn by Blender's GPU module (blender_crt.py, blender-chain/): one process for the whole video, which
+# compiles the preset once, where librashader-cli starts and compiles it again for every frame. 3504x2880 frames
+# go 3 to 9 times as fast into the same encoder (research/crt-in-blender), 0.003/255 from librashader-cli's on a
+# Mac. Tried before librashader's runtimes where Blender is found: on macOS and Linux, which hand it the frames
+# through inherited pipes. Only for the vendored preset, which blender-chain/ is compiled from.
+BLENDER_PLATFORMS = ("darwin", "linux")
+BLENDER_SCRIPT = HERE / "blender_crt.py"
+BLENDER_CHAIN = HERE / "blender-chain"
+RUNTIMES = ("auto", "blender", "metal", "d3d11", "d3d12", "d3d9", "vulkan", "wgpu", "opengl4", "opengl3")
 
 
 class CrtError(RuntimeError):
@@ -134,6 +146,49 @@ def runtime_candidates(have: Sequence[str], requested: str = "auto", platform: s
         return [requested]
     order = runtime_order(platform)
     return [r for r in order if r in have] or list(have) or list(order)
+
+
+def blender_platform(platform: str = sys.platform) -> bool:
+    return platform.startswith(BLENDER_PLATFORMS)
+
+
+def find_blender(explicit: Optional[str] = None) -> Optional[str]:
+    """Blender for --runtime blender, or None when there's none (an explicit one must exist)."""
+    try:
+        return locate.find_blender(explicit)
+    except locate.NotFound:
+        if explicit or os.environ.get("BLENDER"):
+            raise
+        return None
+
+
+def find_librashader_or_none(explicit: Optional[str] = None) -> Optional[str]:
+    try:
+        return find_librashader(explicit)
+    except locate.NotFound:
+        if explicit or os.environ.get("LIBRASHADER_CLI"):
+            raise
+        return None
+
+
+def candidates(librashader: Optional[str], blender: Optional[str], requested: str = "auto",
+               platform: str = sys.platform, preset: Path = PRESET) -> List[str]:
+    """The runtimes to try, in order: Blender's first where it can draw (blender_platform, the vendored preset),
+    then librashader-cli's (runtime_candidates)."""
+    blender_ok = bool(blender) and blender_platform(platform) and Path(preset).resolve() == PRESET.resolve()
+    if requested == "blender":
+        if not blender_ok:
+            why = ("Blender wasn't found" if not blender else "it draws only the vendored crt-royale preset"
+                   if blender_platform(platform) else "it runs on macOS and Linux only, so far")
+            raise CrtError(f"--runtime blender: {why}")
+        return ["blender"]
+    found = runtime_candidates(runtimes_of(librashader), requested, platform) if librashader else []
+    if requested != "auto" and not librashader:
+        raise CrtError(f"--runtime {requested} needs librashader-cli: {install_hint()}")
+    out = (["blender"] if requested == "auto" and blender_ok else []) + found
+    if not out:
+        raise CrtError(f"nothing to draw the CRT with: install Blender, or librashader-cli ({install_hint()})")
+    return out
 
 
 # ---------------------------------------------------------------- settings (as the crt-royale project's script worked them out)
@@ -351,30 +406,192 @@ def pick_runtime(exe: str, preset: Path, settings: Settings, src: Path, dst: Pat
     raise CrtError("no librashader runtime could draw the first frame:\n  " + "\n  ".join(failures))
 
 
-def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader: str, input_size: Tuple[int, int],
-           rate: str, prefilter: str = "", start: Optional[float] = None, duration: Optional[float] = None,
-           alpha: bool = False, codec: str = "prores4444", audio: bool = False, runtime: str = "auto",
-           jobs: int = 4, preset: Path = PRESET, total: Optional[int] = None,
+def encoder_command(ffmpeg: str, frames_in: List[str], out: Path, size: Tuple[int, int], *, codec: str, rate: str,
+                    src_in: List[str], limit: List[str], prefilter: str, alpha: bool, audio: bool) -> List[str]:
+    """The ffmpeg that encodes the drawn frames (`frames_in`: their input options, ending in -i -). With alpha it
+    scales the alpha of the source (through the same prefilter) up to the CRT's size and merges it back."""
+    head = [ffmpeg, "-nostdin", "-y", "-v", "error"] + frames_in
+    maps: List[str] = []
+    if alpha or (audio and codec != "png"):
+        head += src_in
+    if alpha:
+        alpha_chain = ",".join(f for f in (prefilter, frame_clock(rate), "alphaextract",
+                                           f"scale={size[0]}:{size[1]}:flags=bilinear") if f)
+        head += ["-filter_complex", f"[1:v]{alpha_chain}[a];[0:v]{frame_clock(rate)}[c];[c][a]alphamerge[v]"]
+        maps += ["-map", "[v]"]
+    else:
+        maps += ["-map", "0:v"]
+    if codec == "png":
+        tail = ["-f", "image2", "-start_number", "1", str(Path(out) / "%06d.png")]
+    else:
+        if audio:
+            maps += ["-map", "1:a?", "-c:a", "aac", "-b:a", "256k"]
+        tail = ["-r", rate] + video_encoder(ffmpeg, codec, alpha, size) + [str(out)]
+    return head + maps + limit + tail
+
+
+class BlenderUnavailable(CrtError):
+    """Blender couldn't draw the first frame: the next runtime gets the video."""
+
+
+def lut_folder(folder: Path, ffmpeg: str, chain: Path = BLENDER_CHAIN) -> Path:
+    """The chain's mask textures as raw RGBA, and luts.json with their sizes, for blender_crt.py."""
+    doc = json.loads((chain / "chain.json").read_text(encoding="utf-8"))
+    preset_dir = (HERE / doc["preset"]).parent
+    luts = folder / "luts"
+    luts.mkdir(parents=True, exist_ok=True)
+    sizes = {}
+    for lut in doc["luts"]:
+        png = preset_dir / lut["path"]
+        raw = subprocess.run([ffmpeg, "-nostdin", "-v", "error", "-i", str(png), "-f", "rawvideo", "-pix_fmt", "rgba",
+                              "-"], capture_output=True, check=True).stdout
+        size = image_size(png)
+        if not size or len(raw) != size[0] * size[1] * 4:
+            raise CrtError(f"couldn't read the mask texture {png}")
+        (luts / f"{lut['name']}.rgba").write_bytes(raw)
+        sizes[lut["name"]] = list(size)
+    (luts / "luts.json").write_text(json.dumps(sizes), encoding="utf-8")
+    return luts
+
+
+def blender_command(blender: str, luts: Path, in_fd: int, out_fd: int, input_size: Tuple[int, int],
+                    settings: Settings, platform: str = sys.platform) -> List[str]:
+    # On Linux Blender's OpenGL backend drew a 3504x2880 frame in 26 ms on a GTX 1060, its Vulkan backend in 43
+    backend = ["--gpu-backend", "opengl"] if platform.startswith("linux") else []
+    return [blender, "-b", "--factory-startup", "-noaudio", *backend, "--python-exit-code", "1",
+            "--python", str(BLENDER_SCRIPT), "--", str(BLENDER_CHAIN), str(luts), str(in_fd), str(out_fd),
+            str(input_size[0]), str(input_size[1]), str(settings.width), str(settings.height), settings.params]
+
+
+def render_blender(src: Path, out: Path, settings: Settings, *, ffmpeg: str, blender: str,
+                   input_size: Tuple[int, int], rate: str, folder: Path, src_in: List[str], limit: List[str],
+                   prefilter: str, alpha: bool, codec: str, audio: bool, total: Optional[int],
+                   on_progress: Optional[Callable[[int, Optional[int]], None]]) -> int:
+    """The video through blender_crt.py: ffmpeg decodes into one pipe, Blender draws from it into another, ffmpeg
+    encodes from that. Python only starts them; the frames don't pass through it. Raises BlenderUnavailable if
+    Blender stops before its first frame."""
+    luts = lut_folder(folder, ffmpeg)
+    chain = ",".join(f for f in (prefilter, "format=bgr24", "format=rgba") if f)   # the colour, opaque, as BMPs had it
+    size = (settings.width, settings.height)
+    frames_in = ["-f", "rawvideo", "-pix_fmt", "rgb0", "-s", f"{size[0]}x{size[1]}", "-framerate", rate, "-i", "-"]
+    logs = {n: (folder / f"{n}.log").open("wb") for n in ("decode", "encode", "blender")}
+    procs: List[subprocess.Popen] = []
+    done, ready, reports = 0, False, []
+    try:
+        decoder = subprocess.Popen([ffmpeg, "-nostdin", "-v", "error"] + src_in + limit
+                                   + ["-vf", chain, "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
+                                   stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=logs["decode"])
+        procs.append(decoder)
+        encoder = subprocess.Popen(encoder_command(ffmpeg, frames_in, out, size, codec=codec, rate=rate, src_in=src_in,
+                                                   limit=limit, prefilter=prefilter, alpha=alpha, audio=audio),
+                                   stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=logs["encode"])
+        procs.append(encoder)
+        in_fd, out_fd = decoder.stdout.fileno(), encoder.stdin.fileno()
+        drawer = subprocess.Popen(blender_command(blender, luts, in_fd, out_fd, input_size, settings),
+                                  pass_fds=(in_fd, out_fd), stdin=subprocess.DEVNULL, stdout=logs["blender"],
+                                  stderr=subprocess.PIPE)
+        procs.append(drawer)
+        decoder.stdout.close()   # Blender has them now: each pipe ends when its last holder closes it
+        encoder.stdin.close()
+        for raw in drawer.stderr:
+            logs["blender"].write(raw)
+            line = raw.decode("utf-8", "replace").strip()
+            if line.startswith("CRT_READY "):
+                ready = True
+                reports.append(line[len("CRT_READY "):])
+            elif line.startswith("CRT_FRAMES "):
+                done = int(line.split()[1])
+                if on_progress:
+                    on_progress(done, total)
+        drawer.wait()
+        for f in logs.values():
+            f.flush()
+        if drawer.returncode != 0 or not ready:
+            if done == 0:
+                raise BlenderUnavailable(f"Blender couldn't draw the CRT (exit {drawer.returncode}): "
+                                         f"{_tail(folder / 'blender.log')}")
+            raise CrtError(f"Blender stopped after {done} frames (exit {drawer.returncode}): "
+                           f"{_tail(folder / 'blender.log')}")
+        if encoder.wait() != 0:
+            raise CrtError(f"ffmpeg couldn't encode the CRT frames (exit {encoder.returncode}): {_tail(folder / 'encode.log')}")
+        if decoder.wait() != 0:
+            raise CrtError(f"ffmpeg couldn't decode {src} (exit {decoder.returncode}): {_tail(folder / 'decode.log')}")
+        if done == 0:
+            raise CrtError(f"ffmpeg decoded no frames from {src}: {_tail(folder / 'decode.log')}")
+        return done
+    finally:
+        for proc in procs:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+            for pipe in (proc.stdin, proc.stdout, proc.stderr):
+                if pipe is not None:
+                    pipe.close()
+        for f in logs.values():
+            f.close()
+
+
+def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader: Optional[str],
+           input_size: Tuple[int, int], rate: str, prefilter: str = "", start: Optional[float] = None,
+           duration: Optional[float] = None, alpha: bool = False, codec: str = "prores4444", audio: bool = False,
+           runtime: str = "auto", jobs: int = 4, preset: Path = PRESET, total: Optional[int] = None,
            on_progress: Optional[Callable[[int, Optional[int]], None]] = None, work: Optional[Path] = None,
-           keep: bool = False) -> Tuple[int, str]:
+           keep: bool = False, blender: Optional[str] = None) -> Tuple[int, str]:
     """The video through CRT Royale into `out` (a folder of PNGs with codec png). Returns (frames, runtime).
 
-    ffmpeg decodes `src` through `prefilter` into frames of `input_size`, which librashader-cli draws at the
-    settings' size, `jobs` at a time. The encoding ffmpeg takes them in order. With `alpha`, it scales the
-    alpha of `src` (through the same `prefilter`) up to the CRT's size and merges it back (bilinear), as the
-    crt-royale project's script did; with `audio`, it copies the source's audio in (AAC)."""
+    ffmpeg decodes `src` through `prefilter` into frames of `input_size`, which Blender (blender_crt.py) draws at
+    the settings' size in one process, or librashader-cli in one process per frame, `jobs` at a time. The encoding
+    ffmpeg takes them in order. With `alpha`, it scales the alpha of `src` (through the same `prefilter`) up to the
+    CRT's size and merges it back (bilinear), as the crt-royale project's script did; with `audio`, it copies the
+    source's audio in (AAC)."""
     if codec not in CODECS:
         raise ValueError(f"unknown codec {codec!r}; choose from {', '.join(CODECS)}")
-    candidates = runtime_candidates(runtimes_of(librashader), runtime)
+    order = candidates(librashader, blender, runtime, preset=preset)
     folder = Path(work) if work else Path(tempfile.mkdtemp(prefix="crt-"))
+    folder.mkdir(parents=True, exist_ok=True)
+    if codec == "png":
+        Path(out).mkdir(parents=True, exist_ok=True)
+    src_in = (["-ss", str(start)] if start else []) + ["-i", str(src)]
+    limit = ["-t", str(duration)] if duration else []
+    ok = False
+    try:
+        if order[0] == "blender":
+            try:
+                done = render_blender(src, out, settings, ffmpeg=ffmpeg, blender=blender, input_size=input_size,
+                                      rate=rate, folder=folder, src_in=src_in, limit=limit, prefilter=prefilter,
+                                      alpha=alpha, codec=codec, audio=audio, total=total, on_progress=on_progress)
+                ok = True
+                return done, "blender"
+            except BlenderUnavailable as e:
+                order = order[1:]
+                if not order:
+                    raise
+                print(f"  {e}\n  drawing with librashader-cli instead", file=sys.stderr)
+        done, chosen = render_librashader(src, out, settings, ffmpeg=ffmpeg, librashader=librashader,
+                                          input_size=input_size, rate=rate, folder=folder, src_in=src_in, limit=limit,
+                                          prefilter=prefilter, alpha=alpha, codec=codec, audio=audio, jobs=jobs,
+                                          preset=preset, candidates=order, total=total, on_progress=on_progress)
+        ok = True
+        return done, chosen
+    finally:
+        if ok and not keep:
+            shutil.rmtree(folder, ignore_errors=True)
+        elif not ok:
+            print(f"  CRT work folder left for a look: {folder}", file=sys.stderr)
+
+
+def render_librashader(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader: str,
+                       input_size: Tuple[int, int], rate: str, folder: Path, src_in: List[str], limit: List[str],
+                       prefilter: str, alpha: bool, codec: str, audio: bool, jobs: int, preset: Path,
+                       candidates: Sequence[str], total: Optional[int],
+                       on_progress: Optional[Callable[[int, Optional[int]], None]]) -> Tuple[int, str]:
+    """The video through librashader-cli, one run per frame, `jobs` at a time, the frames as BMP files."""
     frames_in, frames_out = folder / "in", folder / "out"
     for d in (frames_in, frames_out):
         d.mkdir(parents=True, exist_ok=True)
     # PNGs without alpha to merge come straight from librashader-cli, which compresses them `jobs` at a time
     # (ffmpeg's PNG encoder would do them one by one). Everything else goes to the encoder as BMPs.
     direct = codec == "png" and not alpha
-    if codec == "png":
-        Path(out).mkdir(parents=True, exist_ok=True)
 
     def drawn_path(i: int) -> Path:
         return Path(out) / f"{i + 1:06d}.png" if direct else frames_out / f"{i:06d}.bmp"
@@ -384,8 +601,6 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
 
     width, height = input_size
     frame_size = width * height * 3
-    src_in = (["-ss", str(start)] if start else []) + ["-i", str(src)]
-    limit = ["-t", str(duration)] if duration else []
     chain = ",".join(f for f in (prefilter, "format=bgr24") if f)
     dec_log, enc_log = (folder / "decode.log").open("wb"), (folder / "encode.log").open("wb")
     decoder = subprocess.Popen([ffmpeg, "-nostdin", "-v", "error"] + src_in + limit
@@ -394,7 +609,6 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
     encoder = None
     pool = cf.ThreadPoolExecutor(max_workers=max(1, jobs))
     done = 0
-    ok = False
     try:
         def decoded() -> Iterator[Path]:
             for i in itertools.count():
@@ -413,27 +627,11 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
 
         if not direct:
             size = (settings.width, settings.height)
-            head = [ffmpeg, "-nostdin", "-y", "-v", "error", "-f", "image2pipe", "-c:v", "bmp", "-framerate", rate,
-                    "-i", "-"]
-            maps: List[str] = []
-            if alpha or (audio and codec != "png"):
-                head += src_in
-            if alpha:
-                alpha_chain = ",".join(f for f in (prefilter, frame_clock(rate), "alphaextract",
-                                                   f"scale={size[0]}:{size[1]}:flags=bilinear") if f)
-                head += ["-filter_complex",
-                         f"[1:v]{alpha_chain}[a];[0:v]{frame_clock(rate)}[c];[c][a]alphamerge[v]"]
-                maps += ["-map", "[v]"]
-            else:
-                maps += ["-map", "0:v"]
-            if codec == "png":
-                tail = ["-f", "image2", "-start_number", "1", str(Path(out) / "%06d.png")]
-            else:
-                if audio:
-                    maps += ["-map", "1:a?", "-c:a", "aac", "-b:a", "256k"]
-                tail = ["-r", rate] + video_encoder(ffmpeg, codec, alpha, size) + [str(out)]
-            encoder = subprocess.Popen(head + maps + limit + tail, stdin=subprocess.PIPE,
-                                       stdout=subprocess.DEVNULL, stderr=enc_log)
+            frames_args = ["-f", "image2pipe", "-c:v", "bmp", "-framerate", rate, "-i", "-"]
+            encoder = subprocess.Popen(encoder_command(ffmpeg, frames_args, out, size, codec=codec, rate=rate,
+                                                       src_in=src_in, limit=limit, prefilter=prefilter, alpha=alpha,
+                                                       audio=audio),
+                                       stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=enc_log)
 
         def finish(path: Path) -> None:
             nonlocal done
@@ -461,7 +659,6 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
                 raise CrtError(f"ffmpeg couldn't encode the CRT frames (exit {encoder.returncode}): {log('encode')}")
         if decoder.wait() != 0:
             raise CrtError(f"ffmpeg couldn't decode {src} (exit {decoder.returncode}): {log('decode')}")
-        ok = True
         return done, chosen
     finally:
         pool.shutdown(wait=True, cancel_futures=True)
@@ -469,12 +666,9 @@ def render(src: Path, out: Path, settings: Settings, *, ffmpeg: str, librashader
             if proc is not None and proc.poll() is None:
                 proc.kill()
                 proc.wait()
+        decoder.stdout.close()
         dec_log.close()
         enc_log.close()
-        if ok and not keep:
-            shutil.rmtree(folder, ignore_errors=True)
-        elif not ok:
-            print(f"  CRT work folder left for a look: {folder}", file=sys.stderr)
 
 
 # ---------------------------------------------------------------- the command
@@ -530,9 +724,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="output video codec: prores4444, h264-444, or png sequence (default: prores4444)")
     ap.add_argument("--params", default="", help="extra shader parameters, e.g. crt_gamma=2.2,halation_weight=0.1")
     ap.add_argument("--runtime", default="auto", choices=RUNTIMES,
-                    help="librashader's runtime (default: the platform's: metal on macOS, d3d11 on Windows, wgpu "
-                         "(on Vulkan) on Linux, falling back to the others the program has)")
+                    help="what draws the shader (default: blender where Blender is found, on macOS and Linux; then "
+                         "librashader's: metal on macOS, d3d11 on Windows, wgpu (on Vulkan) on Linux, falling back "
+                         "to the others the program has)")
     ap.add_argument("--librashader", help="librashader-cli (default: packages/librashader, the PATH or ~/.cargo/bin)")
+    ap.add_argument("--blender", help="Blender, for --runtime blender (default: $BLENDER, the usual install places)")
     ap.add_argument("--preset", default=str(PRESET), help="the shader preset (default: crt-royale, in this folder)")
     ap.add_argument("--ffmpeg", help="ffmpeg (ffprobe is expected next to it)")
     ap.add_argument("--keep", action="store_true", help="keep the work folder")
@@ -540,7 +736,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     ffmpeg = locate.find_ffmpeg(a.ffmpeg)
     ffprobe = locate.find_ffmpeg(a.ffmpeg, name="ffprobe")
-    exe = find_librashader(a.librashader)
+    exe = find_librashader_or_none(a.librashader)
+    blender = find_blender(a.blender)
     info = probe_video(ffprobe, a.input)
     rate = a.fps or info["rate"]
     use_alpha = has_alpha(ffprobe, info["pix_fmt"]) if a.alpha is None else a.alpha
@@ -564,8 +761,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     frames, runtime = render(Path(a.input), Path(a.output), settings, ffmpeg=ffmpeg, librashader=exe,
                              input_size=size, rate=rate, prefilter=vf, start=a.start or None, duration=a.duration,
                              alpha=use_alpha, codec=a.codec, audio=info["audio"], runtime=a.runtime, jobs=a.jobs,
-                             preset=Path(a.preset), total=total, on_progress=progress, keep=a.keep)
-    print(f"{frames} frames in {time.monotonic() - t0:.0f} s, with librashader's {runtime} runtime")
+                             preset=Path(a.preset), total=total, on_progress=progress, keep=a.keep, blender=blender)
+    how = "Blender's GPU module" if runtime == "blender" else f"librashader's {runtime} runtime"
+    print(f"{frames} frames in {time.monotonic() - t0:.0f} s, drawn by {how}")
     print("wrote", a.output)
     return 0
 

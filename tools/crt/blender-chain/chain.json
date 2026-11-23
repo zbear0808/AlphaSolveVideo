@@ -1,0 +1,303 @@
+{
+ "preset": "slang-shaders/crt/crt-royale.slangp",
+ "shaders_commit": "2345ee91602a7404d3a1a6a5df6108d7305fdad4",
+ "librashader": "librashader-cli 0.12.1",
+ "passes": [
+  {
+   "id": 0,
+   "alias": "ORIG_LINEARIZED",
+   "filter": "Nearest",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Input",
+    1.0
+   ],
+   "scale_y": [
+    "Input",
+    1.0
+   ]
+  },
+  {
+   "id": 1,
+   "alias": "VERTICAL_SCANLINES",
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Input",
+    1.0
+   ],
+   "scale_y": [
+    "Viewport",
+    1.0
+   ]
+  },
+  {
+   "id": 2,
+   "alias": "BLOOM_APPROX",
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Absolute",
+    320
+   ],
+   "scale_y": [
+    "Absolute",
+    240
+   ]
+  },
+  {
+   "id": 3,
+   "alias": null,
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Input",
+    1.0
+   ],
+   "scale_y": [
+    "Input",
+    1.0
+   ]
+  },
+  {
+   "id": 4,
+   "alias": "HALATION_BLUR",
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Input",
+    1.0
+   ],
+   "scale_y": [
+    "Input",
+    1.0
+   ]
+  },
+  {
+   "id": 5,
+   "alias": null,
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "Unknown",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Absolute",
+    64
+   ],
+   "scale_y": [
+    "Viewport",
+    0.0625
+   ]
+  },
+  {
+   "id": 6,
+   "alias": "MASK_RESIZE",
+   "filter": "Nearest",
+   "wrap": "ClampToBorder",
+   "format": "Unknown",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Viewport",
+    0.0625
+   ],
+   "scale_y": [
+    "Input",
+    1.0
+   ]
+  },
+  {
+   "id": 7,
+   "alias": "MASKED_SCANLINES",
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Viewport",
+    1.0
+   ],
+   "scale_y": [
+    "Viewport",
+    1.0
+   ]
+  },
+  {
+   "id": 8,
+   "alias": "BRIGHTPASS",
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Viewport",
+    1.0
+   ],
+   "scale_y": [
+    "Viewport",
+    1.0
+   ]
+  },
+  {
+   "id": 9,
+   "alias": null,
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Input",
+    1.0
+   ],
+   "scale_y": [
+    "Input",
+    1.0
+   ]
+  },
+  {
+   "id": 10,
+   "alias": null,
+   "filter": "Linear",
+   "wrap": "ClampToBorder",
+   "format": "R8G8B8A8Srgb",
+   "mipmap_input": false,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Input",
+    1.0
+   ],
+   "scale_y": [
+    "Input",
+    1.0
+   ]
+  },
+  {
+   "id": 11,
+   "alias": null,
+   "filter": "Linear",
+   "wrap": "ClampToEdge",
+   "format": "Unknown",
+   "mipmap_input": true,
+   "frame_count_mod": 0,
+   "scale_x": [
+    "Viewport",
+    1.0
+   ],
+   "scale_y": [
+    "Viewport",
+    1.0
+   ]
+  }
+ ],
+ "luts": [
+  {
+   "name": "mask_grille_texture_small",
+   "path": "shaders/crt-royale/TileableLinearApertureGrille15Wide8And5d5SpacingResizeTo64.png",
+   "filter": "Linear",
+   "wrap": "Repeat",
+   "mipmap": false
+  },
+  {
+   "name": "mask_grille_texture_large",
+   "path": "shaders/crt-royale/TileableLinearApertureGrille15Wide8And5d5Spacing.png",
+   "filter": "Linear",
+   "wrap": "Repeat",
+   "mipmap": true
+  },
+  {
+   "name": "mask_slot_texture_small",
+   "path": "shaders/crt-royale/TileableLinearSlotMaskTall15Wide9And4d5Horizontal9d14VerticalSpacingResizeTo64.png",
+   "filter": "Linear",
+   "wrap": "Repeat",
+   "mipmap": false
+  },
+  {
+   "name": "mask_slot_texture_large",
+   "path": "shaders/crt-royale/TileableLinearSlotMaskTall15Wide9And4d5Horizontal9d14VerticalSpacing.png",
+   "filter": "Linear",
+   "wrap": "Repeat",
+   "mipmap": true
+  },
+  {
+   "name": "mask_shadow_texture_small",
+   "path": "shaders/crt-royale/TileableLinearShadowMaskEDPResizeTo64.png",
+   "filter": "Linear",
+   "wrap": "Repeat",
+   "mipmap": false
+  },
+  {
+   "name": "mask_shadow_texture_large",
+   "path": "shaders/crt-royale/TileableLinearShadowMaskEDP.png",
+   "filter": "Linear",
+   "wrap": "Repeat",
+   "mipmap": true
+  }
+ ],
+ "params": {
+  "aa_cubic_c": 0.5,
+  "aa_gauss_sigma": 0.5,
+  "aa_subpixel_r_offset_x_runtime": -0.33333334,
+  "aa_subpixel_r_offset_y_runtime": 0.0,
+  "beam_horiz_filter": 0.0,
+  "beam_horiz_linear_rgb_weight": 1.0,
+  "beam_horiz_sigma": 0.35,
+  "beam_max_shape": 4.0,
+  "beam_max_sigma": 0.3,
+  "beam_min_shape": 2.0,
+  "beam_min_sigma": 0.02,
+  "beam_shape_power": 0.25,
+  "beam_spot_power": 0.33,
+  "bloom_excess": 0.0,
+  "bloom_underestimate_levels": 0.8,
+  "border_compress": 2.5,
+  "border_darkness": 2.0,
+  "border_size": 0.015,
+  "convergence_offset_x_b": 0.0,
+  "convergence_offset_x_g": 0.0,
+  "convergence_offset_x_r": 0.0,
+  "convergence_offset_y_b": 0.0,
+  "convergence_offset_y_g": 0.0,
+  "convergence_offset_y_r": 0.0,
+  "crt_gamma": 2.5,
+  "diffusion_weight": 0.075,
+  "geom_aspect_ratio_x": 432.0,
+  "geom_aspect_ratio_y": 329.0,
+  "geom_mode_runtime": 0.0,
+  "geom_overscan_x": 1.0,
+  "geom_overscan_y": 1.0,
+  "geom_radius": 2.0,
+  "geom_tilt_angle_x": 0.0,
+  "geom_tilt_angle_y": 0.0,
+  "geom_view_dist": 2.0,
+  "halation_weight": 0.0,
+  "interlace_1080i": 0.0,
+  "interlace_bff": 0.0,
+  "interlace_detect_toggle": 1.0,
+  "lcd_gamma": 2.2,
+  "levels_contrast": 1.0,
+  "mask_num_triads_desired": 480.0,
+  "mask_sample_mode_desired": 0.0,
+  "mask_specify_num_triads": 0.0,
+  "mask_triad_size_desired": 3.0,
+  "mask_type": 1.0
+ }
+}

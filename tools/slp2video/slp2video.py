@@ -313,7 +313,7 @@ def crt_settings(args, lines: int) -> "crt.Settings":
 
 
 def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, ffprobe: str,
-             librashader: str) -> Path:
+             librashader: Optional[str], blender: Optional[str]) -> Path:
     """The picture on the CRT (tools/crt): squeezed to Melee's shape, then each row drawn as one scanline."""
     info = video_info(ffprobe, video)
     lines, rate = info["height"], info["rate"]
@@ -331,8 +331,8 @@ def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, 
                             rate=rate, prefilter=f"{crt.frame_clock(rate)},{squeeze}", alpha=plan.transparent,
                             codec="h264-444" if args.format == "mp4" else "prores4444", runtime=args.crt_runtime,
                             jobs=args.crt_jobs, total=info["frames"], on_progress=Progress("CRT"),
-                            work=work / "crt")
-    print(f"CRT: drawn with librashader's {runtime} runtime")
+                            work=work / "crt", blender=blender)
+    print("CRT: drawn by Blender's GPU module" if runtime == "blender" else f"CRT: drawn with librashader's {runtime} runtime")
     got = video_info(ffprobe, out)["frames"]
     if got != info["frames"]:
         print(f"  warning: the CRT video has {got} frames, the picture {info['frames']}", file=sys.stderr)
@@ -404,10 +404,12 @@ def parse(argv: Sequence[str]):
                         "resolution, 3504x2880)")
     g.add_argument("--crt-triads-per-pixel", type=float, metavar="N", help="phosphor triads per picture pixel")
     g.add_argument("--crt-params", metavar="K=V,...", help="more CRT Royale parameters, e.g. halation_weight=0.1")
-    g.add_argument("--crt-jobs", type=positive, default=4, metavar="N", help="frames the CRT renders at once (default 4)")
+    g.add_argument("--crt-jobs", type=positive, default=4, metavar="N",
+                   help="frames librashader-cli renders at once (default 4; Blender draws one video in one process)")
     g.add_argument("--crt-runtime", choices=crt.RUNTIMES, default="auto",
-                   help="librashader's runtime (default: metal on macOS, d3d11 on Windows, wgpu on Linux, then "
-                        "the others the program has)")
+                   help="what draws the CRT (default: Blender's GPU module where Blender is found, on macOS and "
+                        "Linux; then librashader's: metal on macOS, d3d11 on Windows, wgpu on Linux, then the "
+                        "others the program has)")
 
     g = ap.add_argument_group("the model (--model)")
     g.add_argument("--model-object", action="append", default=[], metavar="NAME",
@@ -453,8 +455,9 @@ def parse(argv: Sequence[str]):
     return args, passthrough
 
 
-def preflight(args, plan: Plan) -> Optional[str]:
-    """Everything the later steps need, found before the render starts. Returns librashader-cli for --crt."""
+def preflight(args, plan: Plan) -> Tuple[Optional[str], Optional[str]]:
+    """Everything the later steps need, found before the render starts. Returns (librashader-cli, Blender) for the
+    CRT: either may be None, if the other can draw it."""
     if plan.model:
         plate.find_blender(args.blender)
         if plan.model == "logo":
@@ -465,10 +468,11 @@ def preflight(args, plan: Plan) -> Optional[str]:
     if plan.sprite and not Path(plan.sprite).expanduser().is_file():
         raise locate.NotFound(f"--shy-guy-sprite: no such file: {plan.sprite}")
     if not plan.crt:
-        return None
-    exe = crt.find_librashader(args.librashader)
-    crt.runtime_candidates(crt.runtimes_of(exe), args.crt_runtime)   # it has the runtime asked for
-    return exe
+        return None, None
+    exe = crt.find_librashader_or_none(args.librashader)
+    blender = crt.find_blender(args.blender)
+    crt.candidates(exe, blender, args.crt_runtime)   # something can draw it, with the runtime asked for
+    return exe, blender
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
@@ -485,7 +489,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         print(f"note: {note}", file=sys.stderr)
     ffmpeg = locate.find_ffmpeg(args.ffmpeg)
     ffprobe = locate.find_ffmpeg(args.ffmpeg, name="ffprobe")
-    librashader = preflight(args, plan)
+    librashader, blender = preflight(args, plan)
     out_dir = Path(args.out_dir).expanduser() if args.out_dir else replay.parent
 
     t0 = time.monotonic()
@@ -515,7 +519,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                           fmt="mkv" if plan.crt else args.format, ffmpeg=ffmpeg, ffprobe=ffprobe)
             print(f"composited in {time.monotonic() - t:.0f} s")
         if plan.crt:
-            crt_pass(args, plan, picture, final, work, ffmpeg, ffprobe, librashader)
+            crt_pass(args, plan, picture, final, work, ffmpeg, ffprobe, librashader, blender)
         elif picture == video:
             final.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(video), str(final))

@@ -1,27 +1,42 @@
 # CRT
 
-CRT Royale on a video: TroggleMonkey's original shader, rendered by [librashader](https://github.com/SnowflakePowered/librashader), on macOS, Linux and Windows. [`slp2video --crt`](../../docs/slp2video.md#the-crt) runs it; it also works on any video by itself.
+CRT Royale on a video: TroggleMonkey's original shader, drawn by Blender's GPU module or by [librashader](https://github.com/SnowflakePowered/librashader), on macOS, Linux and Windows. [`slp2video --crt`](../../docs/slp2video.md#the-crt) runs it; it also works on any video by itself.
 
 ```sh
-python3 tools/crt/install_librashader.py                                       # once: builds librashader-cli (needs Rust)
 python3 tools/crt/render_video.py in.mov out.mov --physical-pixels             # each pixel a physical CRT pixel
 python3 tools/crt/render_video.py in.mov out.mov --physical-pixels --scale 8 --triads-per-pixel 1
 python3 tools/crt/render_video.py in.mp4 out.mov --size 1920x1080 --lines 240  # an emulated 240-line signal
-python3 tools/crt/test_crt.py                                                  # includes a real render, if librashader-cli is there
+python3 tools/crt/install_librashader.py                                       # librashader-cli, for Windows and the tests (needs Rust)
+python3 tools/crt/test_crt.py                                                  # includes real renders, with what's installed
 ```
+
+## Blender draws it, on macOS and Linux
+
+Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto` tries first on macOS and Linux.
+
+- **One process for the whole video.** `blender_crt.py` runs inside Blender, in the background. It compiles the preset once, and draws every frame with Blender's `gpu` module.
+  - ffmpeg's decoded frames come in through one pipe and the drawn frames go out to the encoding ffmpeg through another. The frames never pass through Python or the disk.
+  - `librashader-cli` instead starts again for every frame, and compiles the preset each time: about 0.5 s a frame on an M1, 1 s of CPU on the Linux PC.
+- **The shaders are librashader's.** [`blender-chain/`](blender-chain/README.md) is the vendored preset as `librashader-cli` 0.12.1 compiles it: each pass as GLSL, with its filter, wrap mode, framebuffer format and scaling. `blender_crt.py` sizes and binds the passes as librashader's runtime does.
+  - Against `librashader-cli`'s Metal on the same Mac, its frames are 0.003/255 apart on average, for every mask: 0.36% of pixels differ at all. librashader's own runtimes are 0.4–1.0/255 from each other.
+  - `vendor_chain.py write` writes `blender-chain/`, and `vendor_chain.py check` checks it.
+- **Speed,** 3504x2880 from 584x480 (`research/crt-in-blender`): 37 frames a second on an M1 with nothing to encode, and 12.5 into Apple's ProRes, against 4.3 with `librashader-cli`. On the Linux PC's GTX 1060: 23 alone, 6.4 into `prores_aw` and 9.7 into NVENC, against 0.7 into `prores_ks`.
+- **On Linux it uses Blender's OpenGL backend,** which drew a frame in 26 ms there against its Vulkan backend's 43. Blender takes the first GPU EGL lists (the NVIDIA GPU on the PC). It runs without a display, over SSH.
+- **If Blender can't draw** (no GPU, no `gpu.init` in an older Blender), `auto` says why and goes on with `librashader-cli`.
+- **Only the vendored preset.** `--preset` with any other goes to `librashader-cli`. So does Windows for now: Blender gets the frames through inherited pipes, which `subprocess` passes on macOS and Linux only.
 
 `render_video.py` is the crt-royale TouchDesigner project's `tools/render_video.py`, brought into this repo. It has the same options and works out the same settings (mask, triad size, aspect, output size). On the same input and settings it gave exactly the same pixels on the Mac: physical pixels with and without alpha, and standard mode. What changed:
 
 - **The shaders are here**, in [`slang-shaders/`](slang-shaders/README.md): the 38 files of libretro's slang-shaders (commit `2345ee91`) that `crt/crt-royale.slangp` needs, unmodified, with their licences. A frame rendered with them is identical to one rendered with the project's full checkout.
-- **The runtime suits the platform.** `--runtime auto` (the default) tries this platform's runtimes in order on the first frame, and keeps the first that draws it at the size asked for: Metal on macOS; Direct3D 11, then 12, wgpu, Vulkan, OpenGL on Windows; wgpu, then Vulkan, OpenGL on Linux. The original always asked for Metal.
-- **Frames stream through.** One ffmpeg decodes the video, and the frames go to `librashader-cli` as they come, 4 at a time (`--jobs`). A second ffmpeg encodes them in order as they're drawn. Only the frames in flight are on disk, as BMP files: no PNG compression, which made each frame 0.1 s slower to write and slower again to read back. 150 frames at 3504x2880 with alpha took 30 s instead of 50 on an M1, with identical output.
+- **The runtime suits the platform.** `--runtime auto` (the default) tries Blender first on macOS and Linux (above). Then it tries this platform's librashader runtimes in order on the first frame, and keeps the first that draws it at the size asked for: Metal on macOS; Direct3D 11, then 12, wgpu, Vulkan, OpenGL on Windows; wgpu, then Vulkan, OpenGL on Linux. The original always asked for Metal.
+- **Frames stream through.** One ffmpeg decodes the video, and a second encodes the frames in order as they're drawn. With `librashader-cli` the frames go to it as they come, 4 at a time (`--jobs`), and only the frames in flight are on disk, as BMP files: no PNG compression, which made each frame 0.1 s slower to write and slower again to read back. 150 frames at 3504x2880 with alpha took 30 s instead of 50 on an M1, with identical output.
 - **Alpha follows the picture's framing.** The alpha goes through the same filters as the colour. The original took it from the unframed input, which only mattered in standard mode.
 - **Only Python's standard library.** ffmpeg is found the way slp2alpha finds it.
 - **H.264** (`--codec h264-444`): NVENC where it works (`h264_nvenc` 4:4:4 at a constant QP of 12), else `libx264` at CRF 12, medium preset, as `slp2video` writes it (the original: CRF 10, slow). **ProRes**: Apple's encoder, then `prores_aw`, then `prores_ks`. Each faster encoder is tried on one frame of the real size first, so a missing driver or a frame too wide for it (H.264 on NVENC stops at 4096 pixels) falls through to the next.
 
 ## librashader-cli
 
-`install_librashader.py` builds `librashader-cli` 0.12.1, the version all of this was checked with, with Rust's cargo into `packages/librashader/`. The build folder stays in the cache folder.
+`install_librashader.py` builds `librashader-cli` 0.12.1, the version all of this was checked with, with Rust's cargo into `packages/librashader/`. The build folder stays in the cache folder. Where Blender draws the CRT it isn't needed to render, only to write and check `blender-chain/` and as the tests' reference.
 
 | Platform | Runtimes built | Build time | Also needs |
 |---|---|---|---|
@@ -48,6 +63,8 @@ python3 tools/crt/test_crt.py                                                  #
 | Linux, `test_crt.py` | All pass, including the render: scanlines and phosphor stripes from a grey frame |
 | The Linux PC (Pop!_OS 24.04), natively, against the Mac's Metal | `test_crt.py` passes. A 30-frame clip's PNG frames are on average 0.80/255 from the Mac's on the GTX 1060 (NVIDIA 580), 0.95/255 on the Intel HD 630, 1.0/255 on lavapipe. `slp2video --model logo --crt` on a 2 s clip: 150 s, with Dolphin, Blender and the CRT on the GTX 1060 |
 | Windows | Not yet. `.github/workflows/crt.yml` builds and tests on Windows, Linux and macOS runners when run by hand |
+| The Mac, `--runtime blender` against `librashader-cli`'s Metal | Frames 0.003/255 apart on average, for each mask (3 frames of a real clip). Alpha, which ffmpeg merges in either way, identical. `slp2video --crt` on a 60-frame clip: the same video after ProRes, frame for frame |
+| The Linux PC, `--runtime blender` | To check: the prototype in `research/crt-in-blender` ran there on OpenGL and Vulkan, before the fix to its row order (`docs/plan-gpu-crt-model.md` 3.4) |
 
 ## Linux in Docker
 
@@ -68,8 +85,11 @@ On lavapipe, 10 frames at 3840x2880 took 28 s with 4 at a time on 8 CPU threads:
 | File | |
 |---|---|
 | `render_video.py` | the renderer: the command, and the functions `slp2video` calls |
+| `blender_crt.py` | runs inside Blender: the preset's passes drawn with Blender's `gpu` module, frames through pipes |
+| `blender-chain/` | the preset as `librashader-cli` 0.12.1 compiles it, for `blender_crt.py` |
+| `vendor_chain.py` | writes `blender-chain/` with `librashader-cli` (`write`), or checks it (`check`) |
 | `install_librashader.py` | builds `librashader-cli` for this platform into `packages/librashader/` |
 | `slang-shaders/` | the vendored shaders, `MANIFEST` (each file's git blob id) and their README |
 | `vendor_shaders.py` | copies the shaders from a slang-shaders checkout (`copy DIR`), or checks the copy (`check`) |
-| `test_crt.py` | unit tests: the settings, the runtime order, the shader copy, the BMP frames, and a real render |
+| `test_crt.py` | unit tests: the settings, the runtime order, the encoders, the shader copy and the chain, the BMP frames, and real renders with Blender and with `librashader-cli`, against each other |
 | `linux.Dockerfile` | the Linux build and test container |

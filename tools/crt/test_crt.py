@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import json
 import struct
 import subprocess
 import sys
@@ -107,6 +108,48 @@ class Runtimes(unittest.TestCase):
             built = install_librashader.platform_features(platform)
             self.assertIn(order[0], built, platform)
             self.assertIn("wgpu", built, platform)   # librashader-cli 0.12.1 doesn't compile without it
+
+
+class Candidates(unittest.TestCase):
+    """Blender first where it can draw, then librashader-cli's runtimes."""
+
+    def setUp(self):
+        patcher = mock.patch.object(rv, "runtimes_of", return_value=("metal", "wgpu", "vulkan", "d3d11"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_blender_first_on_macos_and_linux(self):
+        self.assertEqual(rv.candidates("cli", "blender", platform="darwin"), ["blender", "metal", "wgpu"])
+        self.assertEqual(rv.candidates("cli", "blender", platform="linux")[:2], ["blender", "wgpu"])
+        self.assertEqual(rv.candidates("cli", "blender", platform="win32")[0], "d3d11")
+
+    def test_without_one_of_them(self):
+        self.assertEqual(rv.candidates("cli", None, platform="linux")[0], "wgpu")
+        self.assertEqual(rv.candidates(None, "blender", platform="linux"), ["blender"])
+        with self.assertRaises(rv.CrtError):
+            rv.candidates(None, None, platform="linux")
+
+    def test_asked_for(self):
+        self.assertEqual(rv.candidates("cli", "blender", "blender", platform="linux"), ["blender"])
+        self.assertEqual(rv.candidates("cli", "blender", "wgpu", platform="linux"), ["wgpu"])
+        for librashader, blender, runtime, platform in ((None, "blender", "wgpu", "linux"),
+                                                        ("cli", None, "blender", "linux"),
+                                                        ("cli", "blender", "blender", "win32")):
+            with self.assertRaises(rv.CrtError):
+                rv.candidates(librashader, blender, runtime, platform=platform)
+
+    def test_another_preset_goes_to_librashader(self):
+        other = rv.HERE / "slang-shaders" / "other.slangp"
+        self.assertEqual(rv.candidates("cli", "blender", platform="linux", preset=other)[0], "wgpu")
+
+    def test_blender_reads_and_writes_through_inherited_pipes(self):
+        settings = rv.physical_settings(584, 480, 6)
+        cmd = rv.blender_command("blender", Path("luts"), 5, 7, (584, 480), settings, platform="linux")
+        self.assertEqual(cmd[cmd.index("--") + 1:], [str(rv.BLENDER_CHAIN), "luts", "5", "7", "584", "480", "3504",
+                                                     "2880", settings.params])
+        self.assertIn("opengl", cmd)   # faster than Blender's Vulkan backend on Linux
+        self.assertNotIn("--gpu-backend", rv.blender_command("blender", Path("luts"), 5, 7, (584, 480), settings,
+                                                             platform="darwin"))
 
 
 class Shaders(unittest.TestCase):
@@ -247,6 +290,71 @@ class Render(unittest.TestCase):
             by_column = [sum(sum(rows[y][(x * step + channel)::triad * step]) for y in middle) for x in range(triad)]
             self.assertGreater(max(by_column), 1.5 * min(by_column) + 1,
                                f"{runtime}: no phosphor stripes in channel {'bgr'[channel]} {by_column}")
+
+
+def png_rgb(ffmpeg: str, path: Path) -> bytes:
+    return subprocess.run([ffmpeg, "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                          capture_output=True, check=True).stdout
+
+
+class Chain(unittest.TestCase):
+    """blender-chain/ is what librashader-cli compiles from the vendored preset."""
+
+    def test_the_copy_is_what_librashader_writes(self):
+        try:
+            cli = rv.find_librashader()
+        except locate.NotFound:
+            raise unittest.SkipTest("no librashader-cli: python3 tools/crt/install_librashader.py")
+        import vendor_chain
+        self.assertEqual(vendor_chain.check(cli), [])
+
+    def test_the_copy_is_complete(self):
+        doc = json.loads((rv.BLENDER_CHAIN / "chain.json").read_text(encoding="utf-8"))
+        self.assertEqual(doc["shaders_commit"], rv.SHADERS_COMMIT)
+        self.assertEqual((rv.HERE / doc["preset"]).resolve(), rv.PRESET.resolve())
+        for p in doc["passes"]:
+            for stage in ("vertex", "fragment"):
+                self.assertTrue((rv.BLENDER_CHAIN / f"p{p['id']}.{stage}.glsl").is_file())
+        for lut in doc["luts"]:
+            self.assertTrue((rv.PRESET.parent / lut["path"]).is_file(), lut["path"])
+
+
+class BlenderRender(unittest.TestCase):
+    """CRT Royale drawn by Blender's GPU module on this machine: needs Blender and a GPU. Against librashader-cli,
+    when it's there too, on the same frames: within the 1/255 the plan allows (docs/plan-gpu-crt-model.md)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not rv.blender_platform():
+            raise unittest.SkipTest("the Blender runtime runs on macOS and Linux")
+        cls.blender = rv.find_blender()
+        if not cls.blender:
+            raise unittest.SkipTest("no Blender")
+        cls.ffmpeg = locate.find_ffmpeg()
+
+    def test_frames_match_librashader(self):
+        width = height = 136   # 816x816 at 6x: room for crt-royale's mask tiles (see Render)
+        settings = rv.physical_settings(width, height, 6, mask="slot")
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp) / "in.nut"
+            subprocess.run([self.ffmpeg, "-v", "error", "-f", "lavfi", "-i",
+                            f"testsrc2=s={width}x{height}:r=60:d=0.05", "-c:v", "ffv1", str(src)], check=True)
+            kw = dict(ffmpeg=self.ffmpeg, input_size=(width, height), rate="60", prefilter="", codec="png")
+            frames, runtime = rv.render(src, Path(tmp) / "blender", settings, librashader=None, blender=self.blender,
+                                        runtime="blender", work=Path(tmp) / "w1", **kw)
+            self.assertEqual((frames, runtime), (3, "blender"))
+            first = Path(tmp) / "blender" / "000001.png"
+            self.assertEqual(rv.image_size(first), (settings.width, settings.height))
+            try:
+                cli = rv.find_librashader()
+            except locate.NotFound:
+                return
+            runtime = rv.runtime_candidates(rv.runtimes_of(cli))[0]
+            rv.render(src, Path(tmp) / "cli", settings, librashader=cli, runtime=runtime, work=Path(tmp) / "w2", **kw)
+            a, b = png_rgb(self.ffmpeg, first), png_rgb(self.ffmpeg, Path(tmp) / "cli" / "000001.png")
+        self.assertEqual(len(a), len(b))
+        mean = sum(abs(x - y) for x, y in zip(a, b)) / len(a)
+        self.assertLessEqual(mean, 1.0, f"Blender's frame is {mean:.3f}/255 from librashader-cli's ({runtime})")
 
 
 if __name__ == "__main__":

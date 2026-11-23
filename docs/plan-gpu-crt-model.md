@@ -204,8 +204,8 @@ This saves about 2 ms a frame and a temporary file, so it's tidying more than sp
 
 | # | Step | Effort | Where |
 |---|---|---|---|
-| L1 | FFmpeg 8.1 on the PC; `prores_aw` and NVENC in `video_encoder` and `composite`; render tests with them | 0.5 day | The PC |
-| L2 | The CRT in Blender, in `tools/crt`: <br>- `render_video.render` uses it when Blender is there, `librashader-cli` otherwise; <br>- a writer thread; <br>- alpha on the GPU; <br>- check the PC's accuracy again without the flip; <br>- tests against `librashader-cli` for each mask, with and without alpha | 1.5–2 days | The PC, then the Mac |
+| L1 | FFmpeg 8.1 on the PC; `prores_aw` and NVENC in `video_encoder` and `composite`; render tests with them. **Done** 22 November | 0.5 day | The PC |
+| L2 | The CRT in Blender, in `tools/crt`. **Done on the Mac** 22 November: <br>- `render_video.render` uses it (`--runtime blender`, first in `auto` on macOS and Linux) when Blender is there, `librashader-cli` otherwise, and falls back if Blender can't draw; <br>- `blender-chain/`, written and checked by `vendor_chain.py`; <br>- the frames through inherited pipes, and a writer thread; <br>- tests against `librashader-cli` (`test_crt.py`). <br>Left: the PC (functional check, accuracy without the flip, speed), once it's free; alpha on the GPU (the ffmpeg alpha path stays meanwhile) | 1.5–2 days | The PC, then the Mac |
 | L3 | The matte file with NVENC `.mp4` (`--format mp4` with transparency) | 0.5 day | The PC |
 | L4 | The model: duplicate frames, the plate cache, the settings sweep, freezing the scene | 1–1.5 days | The PC, then the Mac |
 | L5 | One ffmpeg from the plates and fighters to the CRT (section 6) | 0.5 day | Anywhere |
