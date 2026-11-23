@@ -1,0 +1,307 @@
+{
+ "machine": "zubairs-Mac-mini.local darwin",
+ "when": "2026-11-22 19:01",
+ "replay": "DishonestMuddyCoyote.slp",
+ "frames": "1500-1739",
+ "ffmpeg": "/opt/homebrew/bin/ffmpeg",
+ "ffmpeg_version": "ffmpeg version 9.0.2 Copyright (c) 2000-2026 the FFmpeg developers",
+ "blender": "/Applications/Blender.app/Contents/MacOS/Blender",
+ "inputs": {
+  "fighters": "/private/var/folders/19/1y1fw6cs2z3bt3f1rjy5d92m0000gn/T/opencode/bmac/input-fighters/fullTransparent - DishonestMuddyCoyote (frames 1500 to 1739, characters only, raw resolution).mov",
+  "game": "/private/var/folders/19/1y1fw6cs2z3bt3f1rjy5d92m0000gn/T/opencode/bmac/input-game/fullOpaque - DishonestMuddyCoyote (frames 1500 to 1739, with background, raw resolution).mov"
+ },
+ "speed": [
+  {
+   "input": "fighters",
+   "runtime": "blender",
+   "format": "mov",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 12.5,
+   "fps": 19.18,
+   "cpu_seconds": 28.8,
+   "cpu_per_frame": 0.12,
+   "mb": 500,
+   "gpu_mib": null,
+   "matte": false,
+   "error": null,
+   "encoder": "prores,4444,yuva444p12le"
+  },
+  {
+   "input": "fighters",
+   "runtime": "metal",
+   "format": "mov",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 47.6,
+   "fps": 5.05,
+   "cpu_seconds": 176.0,
+   "cpu_per_frame": 0.73,
+   "mb": 500,
+   "gpu_mib": null,
+   "matte": false,
+   "error": null,
+   "encoder": "prores,4444,yuva444p12le"
+  },
+  {
+   "input": "fighters",
+   "runtime": "blender",
+   "format": "mp4",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 43.2,
+   "fps": 5.55,
+   "cpu_seconds": 161.7,
+   "cpu_per_frame": 0.67,
+   "mb": 36,
+   "gpu_mib": null,
+   "matte": true,
+   "error": null,
+   "encoder": "h264,High 4:4:4 Predictive,yuv444p"
+  },
+  {
+   "input": "fighters",
+   "runtime": "metal",
+   "format": "mp4",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 222.4,
+   "fps": 1.08,
+   "cpu_seconds": 408.0,
+   "cpu_per_frame": 1.7,
+   "mb": 36,
+   "gpu_mib": null,
+   "matte": true,
+   "error": null,
+   "encoder": "h264,High 4:4:4 Predictive,yuv444p"
+  },
+  {
+   "input": "game",
+   "runtime": "blender",
+   "format": "mov",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 60.8,
+   "fps": 3.95,
+   "cpu_seconds": 30.9,
+   "cpu_per_frame": 0.13,
+   "mb": 1588,
+   "gpu_mib": null,
+   "matte": false,
+   "error": null,
+   "encoder": "prores,4444,yuva444p12le"
+  },
+  {
+   "input": "game",
+   "runtime": "metal",
+   "format": "mov",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 265.7,
+   "fps": 0.9,
+   "cpu_seconds": 283.9,
+   "cpu_per_frame": 1.18,
+   "mb": 1588,
+   "gpu_mib": null,
+   "matte": false,
+   "error": null,
+   "encoder": "prores,4444,yuva444p12le"
+  },
+  {
+   "input": "game",
+   "runtime": "blender",
+   "format": "mp4",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 198.7,
+   "fps": 1.21,
+   "cpu_seconds": 272.1,
+   "cpu_per_frame": 1.13,
+   "mb": 101,
+   "gpu_mib": null,
+   "matte": false,
+   "error": null,
+   "encoder": "h264,High 4:4:4 Predictive,yuv444p"
+  },
+  {
+   "input": "game",
+   "runtime": "metal",
+   "format": "mp4",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 297.8,
+   "fps": 0.81,
+   "cpu_seconds": 518.5,
+   "cpu_per_frame": 2.16,
+   "mb": 101,
+   "gpu_mib": null,
+   "matte": false,
+   "error": null,
+   "encoder": "h264,High 4:4:4 Predictive,yuv444p"
+  }
+ ],
+ "accuracy": [
+  {
+   "input": "fighters",
+   "frame": 0,
+   "mask": "grille",
+   "against": "metal",
+   "mean": 0.0,
+   "max": 6,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 0,
+   "mask": "shadow",
+   "against": "metal",
+   "mean": 0.0,
+   "max": 9,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 0,
+   "mask": "slot",
+   "against": "metal",
+   "mean": 0.0,
+   "max": 9,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 120,
+   "mask": "grille",
+   "against": "metal",
+   "mean": 0.0,
+   "max": 7,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 120,
+   "mask": "shadow",
+   "against": "metal",
+   "mean": 0.0,
+   "max": 11,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 120,
+   "mask": "slot",
+   "against": "metal",
+   "mean": 0.0,
+   "max": 11,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 239,
+   "mask": "grille",
+   "against": "metal",
+   "mean": 0.002,
+   "max": 31,
+   "differ": 0.112
+  },
+  {
+   "input": "fighters",
+   "frame": 239,
+   "mask": "shadow",
+   "against": "metal",
+   "mean": 0.0023,
+   "max": 41,
+   "differ": 0.109
+  },
+  {
+   "input": "fighters",
+   "frame": 239,
+   "mask": "slot",
+   "against": "metal",
+   "mean": 0.002,
+   "max": 31,
+   "differ": 0.112
+  },
+  {
+   "input": "game",
+   "frame": 0,
+   "mask": "grille",
+   "against": "metal",
+   "mean": 0.0043,
+   "max": 9,
+   "differ": 0.264
+  },
+  {
+   "input": "game",
+   "frame": 0,
+   "mask": "shadow",
+   "against": "metal",
+   "mean": 0.0045,
+   "max": 20,
+   "differ": 0.259
+  },
+  {
+   "input": "game",
+   "frame": 0,
+   "mask": "slot",
+   "against": "metal",
+   "mean": 0.0044,
+   "max": 11,
+   "differ": 0.265
+  },
+  {
+   "input": "game",
+   "frame": 120,
+   "mask": "grille",
+   "against": "metal",
+   "mean": 0.0003,
+   "max": 16,
+   "differ": 0.023
+  },
+  {
+   "input": "game",
+   "frame": 120,
+   "mask": "shadow",
+   "against": "metal",
+   "mean": 0.0003,
+   "max": 9,
+   "differ": 0.024
+  },
+  {
+   "input": "game",
+   "frame": 120,
+   "mask": "slot",
+   "against": "metal",
+   "mean": 0.0003,
+   "max": 11,
+   "differ": 0.023
+  },
+  {
+   "input": "game",
+   "frame": 239,
+   "mask": "grille",
+   "against": "metal",
+   "mean": 0.0027,
+   "max": 31,
+   "differ": 0.172
+  },
+  {
+   "input": "game",
+   "frame": 239,
+   "mask": "shadow",
+   "against": "metal",
+   "mean": 0.003,
+   "max": 39,
+   "differ": 0.17
+  },
+  {
+   "input": "game",
+   "frame": 239,
+   "mask": "slot",
+   "against": "metal",
+   "mean": 0.0027,
+   "max": 31,
+   "differ": 0.173
+  }
+ ]
+}

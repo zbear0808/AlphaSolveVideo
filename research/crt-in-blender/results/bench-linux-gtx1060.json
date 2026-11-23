@@ -1,0 +1,307 @@
+{
+ "machine": "pop-os linux",
+ "when": "2026-11-22 22:02",
+ "replay": "DishonestMuddyCoyote.slp",
+ "frames": "1500-1739",
+ "ffmpeg": "/home/zubair/Documents/github/AlphaSolveVideo/packages/ffmpeg/ffmpeg",
+ "ffmpeg_version": "ffmpeg version n8.1.3-27-g8dca1586f4-20261031 Copyright (c) 2000-2026 the FFmpeg developers",
+ "blender": "/home/zubair/.local/bin/blender",
+ "inputs": {
+  "fighters": "/home/zubair/asv-bench/crt240/input-fighters/fullTransparent - DishonestMuddyCoyote (frames 1500 to 1739, characters only, raw resolution).mov",
+  "game": "/home/zubair/asv-bench/crt240/input-game/fullOpaque - DishonestMuddyCoyote (frames 1500 to 1739, with background, raw resolution).mov"
+ },
+ "speed": [
+  {
+   "input": "fighters",
+   "runtime": "blender",
+   "format": "mov",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 29.0,
+   "fps": 8.27,
+   "cpu_seconds": 157.5,
+   "cpu_per_frame": 0.66,
+   "mb": 398,
+   "gpu_mib": 439,
+   "matte": false,
+   "error": null,
+   "encoder": "prores,4444,yuva444p12le"
+  },
+  {
+   "input": "fighters",
+   "runtime": "wgpu",
+   "format": "mov",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 114.8,
+   "fps": 2.09,
+   "cpu_seconds": 585.8,
+   "cpu_per_frame": 2.44,
+   "mb": 398,
+   "gpu_mib": 1526,
+   "matte": false,
+   "error": null,
+   "encoder": "prores,4444,yuva444p12le"
+  },
+  {
+   "input": "fighters",
+   "runtime": "blender",
+   "format": "mp4",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 20.5,
+   "fps": 11.7,
+   "cpu_seconds": 73.6,
+   "cpu_per_frame": 0.31,
+   "mb": 89,
+   "gpu_mib": 2423,
+   "matte": true,
+   "error": null,
+   "encoder": "h264,High 4:4:4 Predictive,yuv444p"
+  },
+  {
+   "input": "fighters",
+   "runtime": "wgpu",
+   "format": "mp4",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 108.6,
+   "fps": 2.21,
+   "cpu_seconds": 489.5,
+   "cpu_per_frame": 2.04,
+   "mb": 89,
+   "gpu_mib": 3515,
+   "matte": true,
+   "error": null,
+   "encoder": "h264,High 4:4:4 Predictive,yuv444p"
+  },
+  {
+   "input": "game",
+   "runtime": "blender",
+   "format": "mov",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 41.6,
+   "fps": 5.76,
+   "cpu_seconds": 254.5,
+   "cpu_per_frame": 1.06,
+   "mb": 2552,
+   "gpu_mib": 439,
+   "matte": false,
+   "error": null,
+   "encoder": "prores,4444,yuv444p12le"
+  },
+  {
+   "input": "game",
+   "runtime": "wgpu",
+   "format": "mov",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 125.9,
+   "fps": 1.91,
+   "cpu_seconds": 695.3,
+   "cpu_per_frame": 2.9,
+   "mb": 2552,
+   "gpu_mib": 1270,
+   "matte": false,
+   "error": null,
+   "encoder": "prores,4444,yuv444p12le"
+  },
+  {
+   "input": "game",
+   "runtime": "blender",
+   "format": "mp4",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 18.7,
+   "fps": 12.86,
+   "cpu_seconds": 52.5,
+   "cpu_per_frame": 0.22,
+   "mb": 291,
+   "gpu_mib": 1698,
+   "matte": false,
+   "error": null,
+   "encoder": "h264,High 4:4:4 Predictive,yuv444p"
+  },
+  {
+   "input": "game",
+   "runtime": "wgpu",
+   "format": "mp4",
+   "frames": 240,
+   "expected": 240,
+   "seconds": 107.1,
+   "fps": 2.24,
+   "cpu_seconds": 472.1,
+   "cpu_per_frame": 1.97,
+   "mb": 293,
+   "gpu_mib": 2790,
+   "matte": false,
+   "error": null,
+   "encoder": "h264,High 4:4:4 Predictive,yuv444p"
+  }
+ ],
+ "accuracy": [
+  {
+   "input": "fighters",
+   "frame": 0,
+   "mask": "grille",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 6,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 0,
+   "mask": "shadow",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 6,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 0,
+   "mask": "slot",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 11,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 120,
+   "mask": "grille",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 6,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 120,
+   "mask": "shadow",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 6,
+   "differ": 0.001
+  },
+  {
+   "input": "fighters",
+   "frame": 120,
+   "mask": "slot",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 11,
+   "differ": 0.002
+  },
+  {
+   "input": "fighters",
+   "frame": 239,
+   "mask": "grille",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 6,
+   "differ": 0.002
+  },
+  {
+   "input": "fighters",
+   "frame": 239,
+   "mask": "shadow",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 6,
+   "differ": 0.002
+  },
+  {
+   "input": "fighters",
+   "frame": 239,
+   "mask": "slot",
+   "against": "wgpu",
+   "mean": 0.0,
+   "max": 7,
+   "differ": 0.003
+  },
+  {
+   "input": "game",
+   "frame": 0,
+   "mask": "grille",
+   "against": "wgpu",
+   "mean": 0.0002,
+   "max": 6,
+   "differ": 0.016
+  },
+  {
+   "input": "game",
+   "frame": 0,
+   "mask": "shadow",
+   "against": "wgpu",
+   "mean": 0.0002,
+   "max": 7,
+   "differ": 0.014
+  },
+  {
+   "input": "game",
+   "frame": 0,
+   "mask": "slot",
+   "against": "wgpu",
+   "mean": 0.0002,
+   "max": 11,
+   "differ": 0.017
+  },
+  {
+   "input": "game",
+   "frame": 120,
+   "mask": "grille",
+   "against": "wgpu",
+   "mean": 0.0001,
+   "max": 6,
+   "differ": 0.009
+  },
+  {
+   "input": "game",
+   "frame": 120,
+   "mask": "shadow",
+   "against": "wgpu",
+   "mean": 0.0001,
+   "max": 8,
+   "differ": 0.009
+  },
+  {
+   "input": "game",
+   "frame": 120,
+   "mask": "slot",
+   "against": "wgpu",
+   "mean": 0.0001,
+   "max": 11,
+   "differ": 0.01
+  },
+  {
+   "input": "game",
+   "frame": 239,
+   "mask": "grille",
+   "against": "wgpu",
+   "mean": 0.0001,
+   "max": 6,
+   "differ": 0.011
+  },
+  {
+   "input": "game",
+   "frame": 239,
+   "mask": "shadow",
+   "against": "wgpu",
+   "mean": 0.0001,
+   "max": 7,
+   "differ": 0.01
+  },
+  {
+   "input": "game",
+   "frame": 239,
+   "mask": "slot",
+   "against": "wgpu",
+   "mean": 0.0002,
+   "max": 13,
+   "differ": 0.012
+  }
+ ]
+}

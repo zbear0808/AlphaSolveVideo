@@ -52,7 +52,7 @@ Your model stands in for the stage, fitted the way the [logo stage](logo-stage.m
 
 With `--static-camera` the model is rendered once, as the stage's fixed camera sees it, and cached (`~/Library/Caches/AlphaSolveVideo/logo-stage/plates/`), so the next replay on that stage only needs the fighters.
 
-With the moving camera, `render --export-camera` writes the game's camera on every frame ([camera-export.md](camera-export.md)), and Blender renders the model through it, one picture per video frame. Two Blender processes share the frames (`--model-jobs`), with 16 samples per frame (`--model-samples`): about 6 frames a second at 640x528 on an M1, so a 4 s clip takes 40 s and a 3-minute game half an hour. A camera export labels its videos exactly 60 fps, and so does the result.
+With the moving camera, `render --export-camera` writes the game's camera on every frame ([camera-export.md](camera-export.md)), and Blender renders the model through it, one picture per video frame. Two Blender processes share the frames (`--model-jobs`), with 16 samples per frame (`--model-samples`): about 4.4 frames a second at 640x480 on an M1 and 9 on a GTX 1060, so a 4 s clip takes 54 s and 26 s. Fewer samples would show: after the CRT, 8 samples are 1.2/255 from 64 on the model, 16 samples 0.8 ([`report-gpu-crt.md`](report-gpu-crt.md)). A camera export labels its videos exactly 60 fps, and so does the result.
 
 Checked with a flat card fitted to Battlefield, through the moving camera: its top edge was where the game's camera puts the stage's top to within -0.03 ± 0.06 px (worst 0.16 px) on all 300 frames of a clip at 640x528, and -0.02 ± 0.06 px (worst 0.14 px) on 120 frames of a raw 640x480 recording, and the fighters stand on it. A still plate and the first frame of a moving one from the fixed camera's export are the same picture (alpha differs by at most 3/255, centroid within 0.002 px). The plates are rendered without EEVEE's overscan, which moved the picture off the camera's projection: by up to 0.5 px at 640x528 and 1.6 px with a raw recording's non-square pixels.
 
@@ -65,7 +65,11 @@ Checked with a flat card fitted to Battlefield, through the moving camera: its t
 - **The shape.** The picture is squeezed sideways to the shape Melee draws it for, 1.2173 times as wide as tall (its camera's aspect): 584x480, or 1168x960. The analog signal has no columns, so this loses nothing a tube would show. Then each row becomes a scanline 6 px tall at native resolution (3 px for Animelee's 960 rows): 3504x2880 either way, with 3 px triads. `--crt-scale` sets the pixels per scanline.
 - **The mask.** `--crt-mask grille` (aperture grille, the default), `slot` or `shadow`. `--crt-triads-per-pixel` and `--crt-params` (e.g. `halation_weight=0.1`) go to the renderer.
 - **Transparency** survives: the renderer keeps the alpha. The model and the background colour are composited before the CRT, so they're on the tube too.
-- **Speed and disk.** Where Blender is found (macOS, Linux), Blender's GPU module draws the CRT in one process for the whole video, and the encoder sets the pace. On an M1, 3504x2880 frames go 12.5 a second into Apple's ProRes, so a 3-minute game takes about 14 minutes; with `librashader-cli` it's 4–5 frames a second (`--crt-jobs 4`), about 40 minutes. Frames stream from one ffmpeg through the renderer into another, so nothing but the few frames in flight touches the disk. The encoder is Apple's ProRes where it works (ten times faster than `prores_ks` at this size), else `prores_aw` (about four times), else `prores_ks`. A minute of 3504x2880 ProRes 4444 is about 23 GB; `--format mp4` is H.264 4:4:4 (chroma subsampling would smear the phosphor stripes), which VLC and editors play but QuickTime doesn't. With an NVIDIA GPU it's encoded by NVENC, about seven times `libx264`'s speed on a GTX 1060, at least as close to the drawn frames, in files about four times as big (about 10 GB a minute).
+- **Speed and disk.** Where Blender is found (macOS, Linux), Blender's GPU module draws the CRT in one process for the whole video, and the encoder sets the pace ([`report-gpu-crt.md`](report-gpu-crt.md)).
+  - **On an M1,** 3504x2880 frames go into Apple's ProRes at 19 a second when the fighters are alone, and 4 when every pixel is drawn. That's about 4 times `librashader-cli`'s speed. `--format mp4` is slower there (1.2–5.6 a second), because `libx264` encodes it.
+  - **On a Linux PC with a GTX 1060,** they go 6–8 a second into `prores_aw` and 12–13 into NVENC: 3–6 times `librashader-cli`'s speed.
+  - **A 3-minute game's CRT** takes 14–31 minutes on the PC, and 10–45 on the M1, depending on the picture and the format.
+  - **Disk:** frames stream from one ffmpeg through the renderer into another, so nothing but the few frames in flight touches the disk. The encoder is Apple's ProRes where it works (ten times faster than `prores_ks` at this size), else `prores_aw` (about four times), else `prores_ks`. A minute of 3504x2880 ProRes 4444 is about 23 GB; `--format mp4` is H.264 4:4:4 (chroma subsampling would smear the phosphor stripes), which VLC and editors play but QuickTime doesn't. With an NVIDIA GPU it's encoded by NVENC, about seven times `libx264`'s speed on a GTX 1060, at least as close to the drawn frames, in files about four times as big (about 10 GB a minute).
 
 The renderer is [`tools/crt`](../tools/crt/README.md): the crt-royale TouchDesigner project's `render_video.py`, brought into this repo with the shaders it needs (libretro's slang-shaders at `2345ee91`, the 38 files the preset uses). Blender draws them, from the preset as `librashader-cli` 0.12.1 compiles it (`tools/crt/blender-chain/`): its frames are 0.003/255 from `librashader-cli`'s. Without Blender, or on Windows, `librashader-cli` draws them: `python3 tools/crt/install_librashader.py` builds it with Rust into `packages/librashader/` (or `--librashader PATH`), and its runtime is the platform's: Metal on macOS, Direct3D 11 on Windows, wgpu on Vulkan on Linux. `--crt-runtime` picks one (default `auto`). On the same picture and settings `librashader-cli` gives exactly the frames the crt-royale project's script gave.
 
@@ -80,25 +84,27 @@ Everything `slp2video` runs is in this repo: the render (`tools/slp2alpha`), the
 | Render and camera export | Verified | Verified on a PC: Vulkan; the camera export byte-identical to the Mac's ([`plan-linux.md`](plan-linux.md)) | The Dolphin build compiles on GitHub Actions; not run yet |
 | The model in Blender, fixed and moving camera | Verified | Verified on the PC, Blender 5.2.3 on the GTX 1060 | Blender found in Program Files or Steam; not run |
 | Composite | Verified | Verified on the PC | Not run |
-| CRT | Verified: Blender's GPU module (Metal), and `librashader-cli`'s Metal | Verified on the PC with `librashader-cli`: wgpu on Vulkan, on the GTX 1060 and the Intel GPU, 0.8 to 0.95/255 from the Mac's frames on average; also in Docker on Mesa's lavapipe. Blender's GPU module (OpenGL): the prototype ran there; `tools/crt`'s to check | Not run. `librashader-cli`: Direct3D 11 first, then wgpu |
+| CRT | Verified: Blender's GPU module (Metal), and `librashader-cli`'s Metal | Verified on the PC: Blender's GPU module (OpenGL) on the GTX 1060, 0.0002/255 from `librashader-cli`'s frames there; `librashader-cli` with wgpu on Vulkan, on the GTX 1060 and the Intel GPU, 0.8 to 0.95/255 from the Mac's frames on average; also in Docker on Mesa's lavapipe | Not run. `librashader-cli`: Direct3D 11 first, then wgpu |
 | `slp2video` itself | Verified | Verified on the PC: a clip with the logo through the moving camera and the CRT | Not run |
 
 Blender is found as given (`--blender`, `$BLENDER`), then in `/Applications` or `~/Applications`, in Program Files or Steam on Windows, on the PATH, in `~/.local/bin` (where a Linux download is often linked, and which an SSH command doesn't put on the PATH) and in `/snap/bin`.
 
-What's left: on Linux, speed. The CRT draws on the Intel GPU unless `VK_DRIVER_FILES` names NVIDIA's driver, and on the PC the CPU limits it: each frame's `librashader-cli` run compiles the shaders again, and `prores_ks` is slow on CRT frames ([`plan-linux-gpu.md`](plan-linux-gpu.md), steps G3, G5 and G7). On Windows, everything after the Dolphin build ([`plan-windows-remaining.md`](plan-windows-remaining.md), step 7 for `slp2video`). `.github/workflows/crt.yml` builds `librashader-cli` and tests the CRT, including a real render, on Windows, Linux and macOS runners, when it's run by hand from the Actions tab.
+What's left: on Linux, the model's speed (Blender's EEVEE is now the longest step; [`plan-gpu-crt-model.md`](plan-gpu-crt-model.md) step L4), and choosing the GPU with one option (`--gpu`, [`plan-linux-gpu.md`](plan-linux-gpu.md) step G5). On Windows, everything after the Dolphin build ([`plan-windows-remaining.md`](plan-windows-remaining.md), step 7 for `slp2video`), and the CRT is still drawn by `librashader-cli` there. `.github/workflows/crt.yml` builds `librashader-cli` and tests the CRT, including a real render, on Windows, Linux and macOS runners, when it's run by hand from the Actions tab.
 
 ## Speed
 
-On an M1, for a 4 s clip:
+For a 4 s clip (240 frames) with the logo through the moving camera and the CRT, `.mov` ([`report-gpu-crt.md`](report-gpu-crt.md)):
 
-| Step | Time |
-|---|---|
-| Render (flicker and solve) | 8 s, about 0.5x real time |
-| Render with `--keep-background` | 5 s, about 0.9x real time |
-| Model, fixed camera | 2 to 3 s, once per stage, finish and size |
-| Model, moving camera | 40 s (6 frames a second) |
-| Composite | 1 s |
-| CRT | About 20 s (12.5 frames a second: Blender's GPU module into Apple's ProRes); 48 s with `librashader-cli` (5 frames a second) |
+| Step | Mac M1 | Linux PC, GTX 1060 |
+|---|---|---|
+| Render (flicker and solve) | 9 s | 16 s |
+| Render with `--keep-background` | about 5 s | — |
+| Model, fixed camera | 2 to 3 s, once per stage, finish and size | — |
+| Model, moving camera (2 Blender processes, 16 samples) | 54 s | 26 s |
+| Composite | 1 s | 2 s |
+| CRT, Blender's GPU module | 17 s (ProRes) | 28 s (ProRes), 16 s (`.mp4`, NVENC) |
+| CRT, `librashader-cli` | 58 s | 119 s |
+| All of it | 82 s | 72 s (`.mp4`: 58 s) |
 
 ## Files
 

@@ -1,6 +1,6 @@
 # GPU work after the render: the model and the CRT
 
-Status: plan, November 2026. Two parts are measured: the CRT drawn inside Blender (section 3), and the encoders. Nothing is in `tools/` yet. Dolphin and the solver are out of scope: Dolphin is at its limit for now, and the solver's fix is an encoder swap (`prores_aw`, [`plan-linux-gpu.md`](plan-linux-gpu.md) step G3), not the GPU.
+Status: plan, November 2026. Steps L1–L3 are done and measured: the CRT drawn by Blender, the faster encoders, and the matte file. [`report-gpu-crt.md`](report-gpu-crt.md) has the measurements. L4 (the model) is next: it's now the longest step. Dolphin and the solver are out of scope: Dolphin is at its limit for now, and the solver's fix is an encoder swap (`prores_aw`, [`plan-linux-gpu.md`](plan-linux-gpu.md) step G3), not the GPU.
 
 Decided, 22 November:
 
@@ -40,8 +40,8 @@ Evidence tags, as in the other plans:
   | CRT in Blender → NVENC H.264 4:4:4 | — | **9.7** |
   | CRT in Blender → NVENC HEVC 4:4:4, with and without a matte file | — | 8.3–8.4 |
 
-  For a 3-minute game (10,800 frames), the PC's CRT goes from about **4.3 hours** in ProRes to **28 minutes** (ProRes) or **19 minutes** (NVENC). The Mac's goes from about 42 to 14 minutes.
-- **Its frames match librashader's:** 0.003/255 apart on average on the Mac, far inside the 1/255 bar, and closer than librashader's own runtimes are to each other (0.4–1.0/255). A first version was 0.8–1.7/255 off because it flipped the frames upside down (3.4). The PC is to measure again. A small Rust program on librashader itself stays the fallback (3.6).
+  For a 3-minute game (10,800 frames), the PC's CRT goes from about **4.3 hours** in ProRes to **28 minutes** (ProRes) or **19 minutes** (NVENC). The Mac's goes from about 42 to 14 minutes. These are the prototype's numbers. `tools/crt`'s, measured on real renders, are in [`report-gpu-crt.md`](report-gpu-crt.md): 22–31 and 14–15 minutes on the PC, and 10–45 minutes on the Mac depending on the picture.
+- **Its frames match librashader's:** 0.003/255 apart on average on the Mac, and 0.0002/255 on the PC, far inside the 1/255 bar. That's closer than librashader's own runtimes are to each other (0.4–1.0/255). A first version was 0.8–1.7/255 off because it flipped the frames upside down (3.4). A small Rust program on librashader itself stays the fallback (3.6).
 - **The plan, in order** (section 7):
   1. NVENC and `prores_aw` on the PC.
   2. The CRT in Blender, as `tools/crt`'s renderer.
@@ -118,7 +118,7 @@ Against `librashader-cli` on the same machine, frames 0, 60 and 119 of a clip, e
 | | Mean difference | Largest | Pixels that differ at all | PSNR |
 |---|---|---|---|---|
 | **Mac: Metal, against `librashader-cli`'s Metal** | **0.003/255** | 15–34 | 0.36% (0.01% by more than 4/255) | 66–70 dB |
-| PC: OpenGL on the GTX 1060, against `librashader-cli`'s wgpu | To measure again with the fix [to test] | | | |
+| **PC: OpenGL on the GTX 1060, against `librashader-cli`'s wgpu** | **0.0000–0.0002/255** | 6–13 | 0.001–0.017% | — |
 | For reference: `librashader-cli`, the PC's wgpu against the Mac's Metal | 0.42/255 (one frame); 0.80–1.0 on a 30-frame clip (`tools/crt/README.md`) | 31 | | 49 dB |
 
 - **The bar is met** on the Mac, by a wide margin: 0.003/255 against the agreed 1/255. Blender's frames are closer to librashader's than librashader's own runtimes are to each other.
@@ -205,9 +205,9 @@ This saves about 2 ms a frame and a temporary file, so it's tidying more than sp
 | # | Step | Effort | Where |
 |---|---|---|---|
 | L1 | FFmpeg 8.1 on the PC; `prores_aw` and NVENC in `video_encoder` and `composite`; render tests with them. **Done** 22 November | 0.5 day | The PC |
-| L2 | The CRT in Blender, in `tools/crt`. **Done on the Mac** 22 November: <br>- `render_video.render` uses it (`--runtime blender`, first in `auto` on macOS and Linux) when Blender is there, `librashader-cli` otherwise, and falls back if Blender can't draw; <br>- `blender-chain/`, written and checked by `vendor_chain.py`; <br>- the frames through inherited pipes, and a writer thread; <br>- tests against `librashader-cli` (`test_crt.py`). <br>Left: the PC (functional check, accuracy without the flip, speed), once it's free; alpha on the GPU (the ffmpeg alpha path stays meanwhile) | 1.5–2 days | The PC, then the Mac |
+| L2 | The CRT in Blender, in `tools/crt`. **Done on the Mac** 22 November: <br>- `render_video.render` uses it (`--runtime blender`, first in `auto` on macOS and Linux) when Blender is there, `librashader-cli` otherwise, and falls back if Blender can't draw; <br>- `blender-chain/`, written and checked by `vendor_chain.py`; <br>- the frames through inherited pipes, and a writer thread; <br>- tests against `librashader-cli` (`test_crt.py`). <br>**Done on the PC** 22 November: tests pass, 0.0002/255 from `librashader-cli`, 3–6 times its speed ([`report-gpu-crt.md`](report-gpu-crt.md)). <br>Left: alpha on the GPU (the ffmpeg alpha path stays meanwhile) | 1.5–2 days | The PC, then the Mac |
 | L3 | The matte file with `.mp4` (`--format mp4 --transparency`). **Done** 22 November: `NAME matte.mp4` beside `NAME.mp4`, from the CRT (NVENC where it works) and from the composite without it; on the Mac the CRT's matte is 0.024/255 from the ProRes alpha of the same frames. Left: check the two files line up in one editor | 0.5 day | The PC |
-| L4 | The model: duplicate frames, the plate cache, the settings sweep, freezing the scene | 1–1.5 days | The PC, then the Mac |
+| L4 | The model: duplicate frames, the plate cache, freezing the scene, cheaper shadows. Not fewer samples: 8 already miss the 1/255 bar after the CRT, and 16 → 8 saves only 9 s → 8 s on the PC for 60 frames, the rest being EEVEE's fixed cost per frame ([`report-gpu-crt.md`](report-gpu-crt.md) section 5) | 1–1.5 days | The PC, then the Mac |
 | L5 | One ffmpeg from the plates and fighters to the CRT (section 6) | 0.5 day | Anywhere |
 | L6 | Docs: `slp2video.md`'s speed table, `tools/crt/README.md`, this plan's status | 0.25 day | Anywhere |
 | **Total** | | **4.25–5.25 days** | |

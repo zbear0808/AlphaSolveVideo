@@ -20,7 +20,12 @@ Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto
 - **The shaders are librashader's.** [`blender-chain/`](blender-chain/README.md) is the vendored preset as `librashader-cli` 0.12.1 compiles it: each pass as GLSL, with its filter, wrap mode, framebuffer format and scaling. `blender_crt.py` sizes and binds the passes as librashader's runtime does.
   - Against `librashader-cli`'s Metal on the same Mac, its frames are 0.003/255 apart on average, for every mask: 0.36% of pixels differ at all. librashader's own runtimes are 0.4–1.0/255 from each other.
   - `vendor_chain.py write` writes `blender-chain/`, and `vendor_chain.py check` checks it.
-- **Speed,** 3504x2880 from 584x480 (`research/crt-in-blender`): 37 frames a second on an M1 with nothing to encode, and 12.5 into Apple's ProRes, against 4.3 with `librashader-cli`. On the Linux PC's GTX 1060: 23 alone, 6.4 into `prores_aw` and 9.7 into NVENC, against 0.7 into `prores_ks`.
+- **Speed,** 3504x2880 from 584x480 ([`docs/report-gpu-crt.md`](../../docs/report-gpu-crt.md)). With nothing to encode, Blender draws 37 frames a second on an M1 and 23 on the Linux PC's GTX 1060. With an encoder, the encoder sets the pace:
+  - **M1 into Apple's ProRes:** 4–19 frames a second, against 0.9–5 with `librashader-cli`;
+  - **PC into `prores_aw`:** 6–8, against 2;
+  - **PC into NVENC:** 12–13, against 2.
+
+  The ranges run from a whole drawn game to fighters alone.
 - **On Linux it uses Blender's OpenGL backend,** which drew a frame in 26 ms there against its Vulkan backend's 43. Blender takes the first GPU EGL lists (the NVIDIA GPU on the PC). It runs without a display, over SSH.
 - **If Blender can't draw** (no GPU, no `gpu.init` in an older Blender), `auto` says why and goes on with `librashader-cli`.
 - **Only the vendored preset.** `--preset` with any other goes to `librashader-cli`. So does Windows for now: Blender gets the frames through inherited pipes, which `subprocess` passes on macOS and Linux only.
@@ -64,7 +69,7 @@ Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto
 | The Linux PC (Pop!_OS 24.04), natively, against the Mac's Metal | `test_crt.py` passes. A 30-frame clip's PNG frames are on average 0.80/255 from the Mac's on the GTX 1060 (NVIDIA 580), 0.95/255 on the Intel HD 630, 1.0/255 on lavapipe. `slp2video --model logo --crt` on a 2 s clip: 150 s, with Dolphin, Blender and the CRT on the GTX 1060 |
 | Windows | Not yet. `.github/workflows/crt.yml` builds and tests on Windows, Linux and macOS runners when run by hand |
 | The Mac, `--runtime blender` against `librashader-cli`'s Metal | Frames 0.003/255 apart on average, for each mask (3 frames of a real clip). Alpha, which ffmpeg merges in either way, identical. `slp2video --crt` on a 60-frame clip: the same video after ProRes, frame for frame |
-| The Linux PC, `--runtime blender` | To check: the prototype in `research/crt-in-blender` ran there on OpenGL and Vulkan, before the fix to its row order (`docs/plan-gpu-crt-model.md` 3.4) |
+| The Linux PC, `--runtime blender` | `test_crt.py` passes, Blender's render against `librashader-cli`'s included. On real 3504x2880 CRT frames, OpenGL on the GTX 1060 is 0.0002/255 from `librashader-cli`'s wgpu on the same GPU, every mask ([`docs/report-gpu-crt.md`](../../docs/report-gpu-crt.md)) |
 
 ## Linux in Docker
 
