@@ -89,6 +89,12 @@ class Plan:
     crt: bool
     sprite: Optional[str]
     notes: List[str] = field(default_factory=list)
+    fmt: str = "mov"
+
+    @property
+    def matte(self) -> bool:
+        """A transparent mp4: H.264 has no alpha, so the alpha goes to `NAME matte.mp4`, white opaque."""
+        return self.transparent and self.fmt == "mp4"
 
     @property
     def raw(self) -> bool:
@@ -152,10 +158,11 @@ def make_plan(args, stage_id: int) -> Plan:
     if mode == "game":
         transparent = False
     else:
-        if args.transparency and (args.bg_color or args.format == "mp4"):
-            why = "--bg-color fills the transparent parts" if args.bg_color else "mp4 (H.264) has no alpha channel"
-            raise UsageError(f"--transparency can't be kept: {why}")
-        transparent = args.transparency is not False and not args.bg_color and args.format == "mov"
+        if args.transparency and args.bg_color:
+            raise UsageError("--transparency can't be kept: --bg-color fills the transparent parts")
+        # H.264 has no alpha: an mp4 is flattened unless --transparency asks for its matte file
+        transparent = (not args.bg_color and (args.transparency is not False if args.format == "mov"
+                                              else bool(args.transparency)))
     if args.bg_color and not HEX.match(args.bg_color):
         raise UsageError(f"--bg-color {args.bg_color}: give a hex colour like 1c2230 or #00ff00")
     background = None if mode == "game" or transparent else (args.bg_color or "000000").lstrip("#").lower()
@@ -164,7 +171,8 @@ def make_plan(args, stage_id: int) -> Plan:
     if model:
         cel = args.model_cel if args.model_cel is not None else args.animelee
         style = "cel" if cel else ("metal" if model == "logo" else "original")
-    return Plan(mode, scale, args.static_camera, transparent, background, model, style, args.crt, sprite, notes)
+    return Plan(mode, scale, args.static_camera, transparent, background, model, style, args.crt, sprite, notes,
+                args.format)
 
 
 def slp2alpha_args(args, plan: Plan, replay: Path, out_dir: Path, passthrough: Sequence[str]) -> List[str]:
@@ -382,11 +390,12 @@ def parse(argv: Sequence[str]):
     g = ap.add_argument_group("output")
     g.add_argument("--transparency", action=argparse.BooleanOptionalAction, default=None,
                    help="keep the alpha channel where nothing is drawn (default: yes, unless --keep-background, "
-                        "--bg-color or --format mp4); --no-transparency flattens onto black")
+                        "--bg-color or --format mp4; with mp4 it goes to a second file, NAME matte.mp4, white "
+                        "where opaque); --no-transparency flattens onto black")
     g.add_argument("--bg-color", metavar="HEX", help="flatten onto this colour instead, e.g. 00ff00")
     g.add_argument("--format", choices=FORMATS,
-                   help="mov: ProRes 4444, with alpha when transparent (default); mp4: H.264 (default with "
-                        "-o NAME.mp4)")
+                   help="mov: ProRes 4444, with alpha when transparent (default); mp4: H.264, flattened unless "
+                        "--transparency (default with -o NAME.mp4)")
     g.add_argument("--out-dir", metavar="DIR", help="where the video goes (default: next to the replay)")
     g.add_argument("-o", "--output", metavar="FILE", help="the video's file name (default: the replay's, with the options)")
     g.add_argument("--keep-intermediates", action="store_true",
@@ -515,8 +524,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             t = time.monotonic()
             # for the CRT: lossless, in NUT, which keeps the exact frame times (Matroska rounds them to the ms)
             target = work / "composite.nut" if plan.crt else final
+            matte = crt.matte_path(final) if plan.matte and not plan.crt else None
             picture = composite.composite(plate_path, video, target, background=plan.background,
-                                          fmt="mkv" if plan.crt else args.format, ffmpeg=ffmpeg, ffprobe=ffprobe)
+                                          fmt="mkv" if plan.crt else args.format, ffmpeg=ffmpeg, ffprobe=ffprobe,
+                                          matte=matte)
             print(f"composited in {time.monotonic() - t:.0f} s")
         if plan.crt:
             crt_pass(args, plan, picture, final, work, ffmpeg, ffprobe, librashader, blender)
@@ -525,6 +536,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             shutil.move(str(video), str(final))
         ok = True
         print(f"done in {time.monotonic() - t0:.0f} s\n  {final}")
+        if plan.matte:
+            print(f"  {crt.matte_path(final)}  (its transparency, as a matte: white is opaque)")
     finally:
         if args.keep_intermediates or not ok:
             print(f"  work folder {'kept' if ok else 'left for a look'}: {work}", file=sys.stderr)

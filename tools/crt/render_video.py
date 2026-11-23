@@ -26,8 +26,8 @@ same settings, and:
     upscaled to whatever resolution is required (e.g. 6x, 8x) so each input pixel is fully
     resolved as a physical CRT pixel with beam profile, scanline gaps, and phosphor triads.
 
-  Codecs: prores4444 (default, .mov, QuickTime-friendly, full chroma), h264-444 (.mp4, VLC/ffplay),
-  png (a numbered PNG sequence in a folder).
+  Codecs: prores4444 (default, .mov, QuickTime-friendly, full chroma), h264-444 (.mp4, VLC/ffplay; with alpha,
+  the alpha goes to NAME matte.mp4, a grey video), png (a numbered PNG sequence in a folder).
 
 It needs ffmpeg, and Blender 5.2 (macOS, Linux) or librashader-cli 0.12.1 (python3 tools/crt/install_librashader.py).
 Python's standard library is enough here: no numpy or Pillow (blender_crt.py uses Blender's own numpy).
@@ -324,6 +324,29 @@ H264_444 = [
      "-rc", "constqp", "-qp", "12"],
     ["-c:v", "libx264", "-crf", "12", "-preset", "medium", "-pix_fmt", "yuv444p"],
 ]
+# The alpha of an .mp4 with transparency, as a grey video of its own: H.264 has no alpha channel. White is opaque,
+# as a luma matte has it in Resolve, Premiere and Final Cut. 4:2:0 loses nothing in a grey picture.
+H264_MATTE = [
+    ["-c:v", "h264_nvenc", "-preset", "p5", "-tune", "hq", "-profile:v", "high", "-pix_fmt", "yuv420p",
+     "-rc", "constqp", "-qp", "12"],
+    ["-c:v", "libx264", "-crf", "12", "-preset", "medium", "-pix_fmt", "yuv420p"],
+]
+MATTE_SUFFIX = " matte"
+
+
+def matte_path(out: Path) -> Path:
+    """Where the matte of an .mp4 goes: `NAME matte.mp4` next to `NAME.mp4`."""
+    out = Path(out)
+    return out.with_name(f"{out.stem}{MATTE_SUFFIX}{out.suffix}")
+
+
+def first_working(ffmpeg: str, choices: List[List[str]], size: Tuple[int, int]) -> List[str]:
+    """The first encoder arguments that are listed and encode a frame of this size here; the last ones otherwise."""
+    have = solve.available_encoders(ffmpeg)
+    for args in choices[:-1]:
+        if args[args.index("-c:v") + 1] in have and solve.encoder_works(ffmpeg, tuple(args), tuple(size)):
+            return args
+    return choices[-1]
 
 
 def video_encoder(ffmpeg: str, codec: str, alpha: bool, size: Tuple[int, int]) -> List[str]:
@@ -331,19 +354,15 @@ def video_encoder(ffmpeg: str, codec: str, alpha: bool, size: Tuple[int, int]) -
     Apple's encoder (about ten times prores_ks's speed at 3504x2880), prores_aw (about four times), prores_ks.
     H.264 4:4:4: NVENC, then libx264."""
     if codec == "h264-444":
-        choices = H264_444
-        tail = ["-movflags", "+faststart"]
-    elif codec == "prores4444":
-        choices = ([spec.video_args for spec in solve.encoder_choices(ffmpeg, "mov")] if alpha
-                   else solve.opaque_choices(ffmpeg, "mov"))
-        tail = []
-    else:
-        raise ValueError(f"no video encoder for {codec}")
-    have = solve.available_encoders(ffmpeg)
-    for args in choices[:-1]:
-        if args[args.index("-c:v") + 1] in have and solve.encoder_works(ffmpeg, tuple(args), tuple(size)):
-            return args + tail
-    return choices[-1] + tail
+        return first_working(ffmpeg, H264_444, size) + ["-movflags", "+faststart"]
+    if codec == "prores4444":
+        return first_working(ffmpeg, [spec.video_args for spec in solve.encoder_choices(ffmpeg, "mov")] if alpha
+                             else solve.opaque_choices(ffmpeg, "mov"), size)
+    raise ValueError(f"no video encoder for {codec}")
+
+
+def matte_encoder(ffmpeg: str, size: Tuple[int, int]) -> List[str]:
+    return first_working(ffmpeg, H264_MATTE, size) + ["-movflags", "+faststart"]
 
 
 def _tail(path: Path, lines: int = 12) -> str:
@@ -409,15 +428,21 @@ def pick_runtime(exe: str, preset: Path, settings: Settings, src: Path, dst: Pat
 def encoder_command(ffmpeg: str, frames_in: List[str], out: Path, size: Tuple[int, int], *, codec: str, rate: str,
                     src_in: List[str], limit: List[str], prefilter: str, alpha: bool, audio: bool) -> List[str]:
     """The ffmpeg that encodes the drawn frames (`frames_in`: their input options, ending in -i -). With alpha it
-    scales the alpha of the source (through the same prefilter) up to the CRT's size and merges it back."""
+    scales the alpha of the source (through the same prefilter) up to the CRT's size and merges it back, or, for
+    H.264, which has no alpha, writes it as a matte of its own (matte_path)."""
     head = [ffmpeg, "-nostdin", "-y", "-v", "error"] + frames_in
     maps: List[str] = []
+    matte: List[str] = []
     if alpha or (audio and codec != "png"):
         head += src_in
     if alpha:
         alpha_chain = ",".join(f for f in (prefilter, frame_clock(rate), "alphaextract",
                                            f"scale={size[0]}:{size[1]}:flags=bilinear") if f)
-        head += ["-filter_complex", f"[1:v]{alpha_chain}[a];[0:v]{frame_clock(rate)}[c];[c][a]alphamerge[v]"]
+        if codec == "h264-444":
+            head += ["-filter_complex", f"[1:v]{alpha_chain}[a];[0:v]{frame_clock(rate)}[v]"]
+            matte = ["-map", "[a]", *limit, "-r", rate, *matte_encoder(ffmpeg, size), str(matte_path(out))]
+        else:
+            head += ["-filter_complex", f"[1:v]{alpha_chain}[a];[0:v]{frame_clock(rate)}[c];[c][a]alphamerge[v]"]
         maps += ["-map", "[v]"]
     else:
         maps += ["-map", "0:v"]
@@ -427,7 +452,7 @@ def encoder_command(ffmpeg: str, frames_in: List[str], out: Path, size: Tuple[in
         if audio:
             maps += ["-map", "1:a?", "-c:a", "aac", "-b:a", "256k"]
         tail = ["-r", rate] + video_encoder(ffmpeg, codec, alpha, size) + [str(out)]
-    return head + maps + limit + tail
+    return head + maps + limit + tail + matte
 
 
 class BlenderUnavailable(CrtError):
@@ -765,6 +790,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     how = "Blender's GPU module" if runtime == "blender" else f"librashader's {runtime} runtime"
     print(f"{frames} frames in {time.monotonic() - t0:.0f} s, drawn by {how}")
     print("wrote", a.output)
+    if use_alpha and a.codec == "h264-444":
+        print("wrote", matte_path(Path(a.output)), "(the alpha, as a matte: white is opaque)")
     return 0
 
 

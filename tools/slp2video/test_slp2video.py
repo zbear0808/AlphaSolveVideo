@@ -72,11 +72,14 @@ class Transparency(unittest.TestCase):
         p = plan("--no-transparency")
         self.assertEqual((p.transparent, p.background), (False, "000000"))
 
-    def test_mp4_has_no_alpha(self):
+    def test_mp4_flattens_unless_asked_and_then_has_a_matte(self):
         p = plan("--format", "mp4")
-        self.assertEqual((p.transparent, p.background), (False, "000000"))
+        self.assertEqual((p.transparent, p.background, p.matte), (False, "000000", False))
+        p = plan("--format", "mp4", "--transparency")
+        self.assertEqual((p.transparent, p.background, p.matte), (True, None, True))
+        self.assertFalse(plan().matte)   # ProRes keeps its alpha
         with self.assertRaises(slp2video.UsageError):
-            plan("--format", "mp4", "--transparency")
+            plan("--format", "mp4", "--transparency", "--bg-color", "00ff00")
 
     def test_a_bad_colour(self):
         with self.assertRaises(slp2video.UsageError):

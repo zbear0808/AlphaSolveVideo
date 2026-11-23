@@ -55,15 +55,18 @@ def encoders(ffmpeg: str, fmt: str, alpha: bool) -> List[List[str]]:
 
 
 def composite(plate: Optional[Path], video: Path, out: Path, *, background: Optional[str] = None, fmt: str = "mov",
-              ffmpeg: Optional[str] = None, ffprobe: Optional[str] = None) -> Path:
+              ffmpeg: Optional[str] = None, ffprobe: Optional[str] = None, matte: Optional[Path] = None) -> Path:
     """The video over the plate (a PNG, a folder of frames, or None for no plate), over a solid colour if
-    `background` is given (always for mp4). Without a background the alpha is kept (mov, mkv)."""
+    `background` is given (always for mp4, unless `matte`). Without a background the alpha is kept (mov, mkv), or
+    for mp4 written to `matte` as a grey video (white opaque), H.264 having no alpha."""
     ffmpeg = ffmpeg or locate.find_ffmpeg()
     ffprobe = ffprobe or locate.find_ffmpeg(name="ffprobe")
     info = probe(ffprobe, video)
     rate = info.get("r_frame_rate", DEFAULT_RATE)
     size = f"{info['width']}x{info['height']}"
-    if fmt == "mp4" and not background:
+    if matte is not None and (fmt != "mp4" or background):
+        raise ValueError("a matte file is for an mp4 that keeps its transparency")
+    if fmt == "mp4" and not background and matte is None:
         background = DEFAULT_BACKGROUND
     inputs: List[str] = []
     graph: List[str] = []
@@ -89,13 +92,17 @@ def composite(plate: Optional[Path], video: Path, out: Path, *, background: Opti
         graph.append(f"color=c=0x{colour}:s={size}:r={rate}[solid]")
         graph.append(f"[solid]{picture}overlay=format=rgb:shortest=1" + (",format=yuv420p" if fmt == "mp4" else "")
                      + "[out]")
+    elif matte is not None:
+        graph.append(f"{picture}split[pc][pm];[pc]format=yuv420p[out];[pm]alphaextract,format=yuv420p[matte]")
     else:
         graph.append(f"{picture}null[out]")
     out.parent.mkdir(parents=True, exist_ok=True)
     head = [ffmpeg, "-nostdin", "-y", "-v", "error"] + inputs + ["-filter_complex", ";".join(graph), "-map", "[out]"]
+    second = ["-map", "[matte]"] + H264 + [str(matte)] if matte is not None else []
     done = None
     for codec in encoders(ffmpeg, fmt, alpha=not background):
-        done = subprocess.run(head + codec + [str(out)], capture_output=True, encoding="utf-8", errors="replace")
+        done = subprocess.run(head + codec + [str(out)] + second, capture_output=True, encoding="utf-8",
+                              errors="replace")
         if done.returncode == 0:
             break
     else:

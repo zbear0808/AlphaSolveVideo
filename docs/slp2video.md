@@ -10,7 +10,7 @@ python3 tools/slp2video/slp2video.py game.slp --model logo --static-camera --crt
 python3 tools/slp2video/slp2video.py ys.slp --shy-guy-sprite mascot.png --bg-color 00ff00 --format mp4
 ```
 
-The result is one file next to the replay (`--out-dir DIR`, or `-o FILE`), named after the replay and the options, for example `game (frames 3120 to 3480, characters only, animelee, 60 fps), statue stage, crt.mov`. It's ProRes 4444 (`.mov`), with alpha unless something fills the background, or H.264 (`--format mp4`, or `-o NAME.mp4`).
+The result is one file next to the replay (`--out-dir DIR`, or `-o FILE`), named after the replay and the options, for example `game (frames 3120 to 3480, characters only, animelee, 60 fps), statue stage, crt.mov`. It's ProRes 4444 (`.mov`), with alpha unless something fills the background, or H.264 (`--format mp4`, or `-o NAME.mp4`). H.264 has no alpha, so an `.mp4` is flattened, unless `--transparency` asks for a second file: `NAME matte.mp4`, the alpha as a grey video, white where the picture is opaque. Resolve, Premiere and Final Cut can use it as a luma matte.
 
 ## What you can ask for
 
@@ -19,7 +19,7 @@ The result is one file next to the replay (`--out-dir DIR`, or `-o FILE`), named
 | A logo or sprite for the Shy Guys | `--shy-guy-sprite IMAGE` | Yoshi's Story. A PNG with transparency works best ([shy-guy-sprite.md](shy-guy-sprite.md)) |
 | A 3D model in place of the stage | `--model FILE` | `.blend`, `.glb`/`.gltf`, `.fbx`, `.obj`, `.stl`, `.ply`, `.usd`/`.usdz`, `.abc`; `--model logo` for the [logo stage](logo-stage.md)'s logo |
 | The background kept or removed | `--keep-background` | Default: removed. Kept: the game exactly as it looks, an ordinary opaque video |
-| Transparency | on by default | `--no-transparency` flattens onto black, `--bg-color HEX` onto a colour; `--format mp4` has none |
+| Transparency | on by default | `--no-transparency` flattens onto black, `--bg-color HEX` onto a colour; `--format mp4` flattens, or with `--transparency` writes a matte file beside it |
 | A static or a moving camera | `--static-camera` | Default: the game's own moving camera |
 | Regular Melee or Animelee | `--animelee` | The cel-shaded skins ([tools/animelee](../tools/animelee/README.md)) |
 | A CRT | `--crt` | CRT Royale's realistic pixels, at the console's native resolution for regular Melee |
