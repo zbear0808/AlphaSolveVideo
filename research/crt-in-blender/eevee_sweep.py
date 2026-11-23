@@ -35,6 +35,8 @@ VARIANTS = {
     "shadow steps 6 -> 2": {"shadow_step_count": 2},
     "no fast GI": {"use_fast_gi": False},
     "fast GI at quarter resolution": {"fast_gi_resolution": "4"},
+    "no ray tracing": {"use_raytracing": False},
+    "no shadows, no ray tracing": {"use_shadows": False, "use_raytracing": False},
 }
 DIFF = r"""
 import subprocess, sys
