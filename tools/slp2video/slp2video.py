@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -58,6 +59,10 @@ EXAMPLES = """examples:
 CRT_ROWS = 2880          # output rows the CRT pass aims for: 6 per scanline of the native 480 lines
 CRT_MASKS = tuple(sorted(crt.MASKS))
 PLATE_CACHE = locate.cache_root() / "logo-stage" / "plates"
+# The moving camera's plates, one folder of frames per replay clip, model and finish: rendering the same clip
+# again (another CRT mask, colour or format) skips Blender. About 160 KB a frame, 1.8 GB for a 3-minute game.
+SEQUENCE_CACHE = locate.cache_root() / "logo-stage" / "sequences"
+SEQUENCES_KEPT = 3
 MOVING_SAMPLES = 16      # EEVEE samples per frame of a moving-camera plate; a still plate uses the finish's default
 FORMATS = ("mov", "mp4")
 PREFIXES = (("transparent", "fullTransparent - "), ("alpha_map", "alphaMap - "), ("opaque", solve.OPAQUE_PREFIX),
@@ -295,14 +300,26 @@ def model_plate(args, plan: Plan, stage_id: int, size: Tuple[int, int], camera_j
         return path
     if camera_json is None:
         raise RuntimeError("slp2alpha wrote no camera export, which the moving camera needs")
-    folder = work / "plate"
     frames, _ = plate.camera_export_frames(camera_json)
+    samples = args.model_samples or MOVING_SAMPLES
+    job, _ = plate.sequence_job(stage_id, plan.style, plan.scale, work / "plate", camera_json, samples=samples, **kw)
+    key = plate.sequence_key(job, source)
+    folder = SEQUENCE_CACHE / key if args.model_cache else work / "plate"
+    if args.model_cache and plate.cached_sequence(folder, frames):
+        os.utime(folder)   # the most recently used are kept
+        print(f"model: {frames} frames through the game's camera (cached: {folder})")
+        return folder
+    if args.model_cache and folder.exists():
+        shutil.rmtree(folder)   # an earlier run stopped part way: its last frame may be half written
     print(f"model: {frames} frames through the game's camera, {args.model_jobs} Blender process"
           f"{'es' if args.model_jobs > 1 else ''}")
     plate.render_sequence(stage_id, plan.style, plan.scale, folder, camera_json, jobs=args.model_jobs,
-                          on_progress=Progress("Blender"), samples=args.model_samples or MOVING_SAMPLES,
-                          blender=args.blender, logo_project=args.logo_project, **kw)
+                          on_progress=Progress("Blender"), samples=samples, blender=args.blender,
+                          logo_project=args.logo_project, log_dir=work, **kw)
     print(f"model: rendered in {time.monotonic() - t0:.0f} s")
+    if args.model_cache:
+        for old in plate.prune_sequences(SEQUENCE_CACHE, args.model_cache, spare=folder):
+            print(f"  model cache: dropped {old.name}, the least recently used")
     return folder
 
 
@@ -447,6 +464,9 @@ def parse(argv: Sequence[str]):
                    help=f"EEVEE samples (default: 64, 32 cel; {MOVING_SAMPLES} per frame with the moving camera)")
     g.add_argument("--model-jobs", type=positive, default=2, metavar="N",
                    help="Blender processes rendering the moving camera's frames together (default 2)")
+    g.add_argument("--model-cache", type=int, default=SEQUENCES_KEPT, metavar="N",
+                   help=f"keep the moving camera's frames of the last N clips, so the same clip with other options "
+                        f"skips Blender (default {SEQUENCES_KEPT}, about 1.8 GB each for a 3-minute game; 0: none)")
     g.add_argument("--logo-project", metavar="FILE", help="the logo's Blender project (default: ~/Documents/logo_metal_fracture/...)")
 
     g = ap.add_argument_group("tools")

@@ -38,6 +38,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -148,6 +149,34 @@ def job_key(job: dict, source: Path) -> str:
     return hashlib.sha1(blob).hexdigest()[:12]
 
 
+def sequence_key(job: dict, source: Path) -> str:
+    """job_key for a moving camera's plate: the camera export by its contents, not where it was written."""
+    camera = Path(job["camera_export"]).read_bytes()
+    spec = dict(job, camera_export=hashlib.sha1(camera).hexdigest())
+    return job_key(spec, source)
+
+
+SEQUENCE_DONE = "complete.json"
+
+
+def cached_sequence(folder: Path, frames: int) -> bool:
+    """Whether a cached plate sequence in `folder` was rendered to the end."""
+    try:
+        return json.loads((Path(folder) / SEQUENCE_DONE).read_text(encoding="utf-8"))["frames"] == frames
+    except (OSError, ValueError, KeyError):
+        return False
+
+
+def prune_sequences(root: Path, keep: int, spare: Optional[Path] = None) -> List[Path]:
+    """Drop all but the `keep` most recently used plate sequences under `root` (never `spare`). Returns the dropped."""
+    found = sorted((p for p in Path(root).iterdir() if p.is_dir()) if Path(root).is_dir() else [],
+                   key=lambda p: p.stat().st_mtime, reverse=True)
+    dropped = [p for p in found if p != spare][max(0, keep - (1 if spare in found else 0)):]
+    for p in dropped:
+        shutil.rmtree(p, ignore_errors=True)
+    return dropped
+
+
 def blender_command(exe: str, job: dict, project: Optional[Path], job_file: Path) -> List[str]:
     """How Blender starts for a job: the logo project at its scene, a model's own .blend, or the empty startup
     scene that blender_plate.py imports a model into."""
@@ -219,21 +248,29 @@ def chunks(total: int, jobs: int) -> List[Tuple[int, int]]:
     return [(bounds[i], bounds[i + 1] - 1) for i in range(jobs)]
 
 
-def render_sequence(stage: int, style: str, scale: int, folder: Path, camera_export: Path, *, jobs: int = 1,
-                    on_progress: Optional[Callable[[int, int], None]] = None, **kw) -> int:
-    """The plate through the game's moving camera: folder/000001.png for the first video frame of the camera
-    export, and so on. `jobs` Blender processes share the frames. Returns the number of frames."""
-    blender, logo_project = kw.pop("blender", None), kw.pop("logo_project", None)
+def sequence_job(stage: int, style: str, scale: int, folder: Path, camera_export: Path, **kw) -> Tuple[dict, int]:
+    """The job for a moving camera's plate, and its number of frames."""
     total, size = camera_export_frames(camera_export)
+    return make_job(stage, style, scale, folder, size=size, camera_export=camera_export, **kw), total
+
+
+def render_sequence(stage: int, style: str, scale: int, folder: Path, camera_export: Path, *, jobs: int = 1,
+                    on_progress: Optional[Callable[[int, int], None]] = None, log_dir: Optional[Path] = None,
+                    **kw) -> int:
+    """The plate through the game's moving camera: folder/000001.png for the first video frame of the camera
+    export, and so on. `jobs` Blender processes share the frames; frames already in the folder are kept. Writes
+    SEQUENCE_DONE when every frame is there. Returns the number of frames."""
+    blender, logo_project = kw.pop("blender", None), kw.pop("logo_project", None)
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    job = make_job(stage, style, scale, folder, size=size, camera_export=camera_export, **kw)
+    log_dir = Path(log_dir) if log_dir else folder.parent
+    job, total = sequence_job(stage, style, scale, folder, camera_export, **kw)
     project = None if job.get("model") else find_project(logo_project)
     errors: List[BaseException] = []
 
     def run(first: int, last: int, n: int) -> None:
         try:
-            run_blender(dict(job, frames=[first, last]), project, blender, log=folder.parent / f"blender-{n}.log")
+            run_blender(dict(job, frames=[first, last]), project, blender, log=log_dir / f"blender-{n}.log")
         except BaseException as e:  # reported once every process has stopped
             errors.append(e)
 
@@ -250,6 +287,7 @@ def render_sequence(stage: int, style: str, scale: int, folder: Path, camera_exp
     missing = [f for f in range(1, total + 1) if not (folder / f"{f:06d}.png").exists()]
     if missing:
         raise RuntimeError(f"Blender left {len(missing)} of {total} frames unrendered (first: {missing[0]})")
+    (folder / SEQUENCE_DONE).write_text(json.dumps({"frames": total}), encoding="utf-8")
     if on_progress:
         on_progress(total, total)
     return total

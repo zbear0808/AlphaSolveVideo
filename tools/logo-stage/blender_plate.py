@@ -522,8 +522,9 @@ def configure_render(sc, job):
     cel = job["style"] == "cel"
     samples = int(job.get("samples") or (32 if cel else 64))
     # No overscan: EEVEE's moves the picture off the camera's projection (up to 0.5 px at 640 x 528, 1.6 px with
-    # the non-square pixels of a raw recording), which the fighters would then not stand on.
-    for attr, value in (("taa_render_samples", samples), ("use_raytracing", not cel), ("use_shadows", True),
+    # the non-square pixels of a raw recording), which the fighters would then not stand on. The cel finish is
+    # emission only, so shadows change none of its pixels, and cost it two thirds of each frame on an M1.
+    for attr, value in (("taa_render_samples", samples), ("use_raytracing", not cel), ("use_shadows", not cel),
                         ("use_overscan", False), ("motion_blur_steps", 1)):
         if hasattr(ee, attr):
             setattr(ee, attr, value)

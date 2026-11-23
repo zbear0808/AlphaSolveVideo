@@ -193,5 +193,46 @@ class Names(unittest.TestCase):
         self.assertEqual(slp2video.output_name("game", slp2video.make_plan(args, BATTLEFIELD), args), "game")
 
 
+class ModelCache(unittest.TestCase):
+    """The moving camera's plates are kept by what they show, and only the most recently used few."""
+
+    def test_the_key_follows_the_camera_not_where_it_was_written(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            src, a, b, c = (Path(tmp) / n for n in ("model.blend", "a.json", "b.json", "c.json"))
+            src.write_bytes(b"model")
+            a.write_text('{"x": 1}')
+            b.write_text('{"x": 1}')
+            c.write_text('{"x": 2}')
+            job = {"style": "metal", "size": [640, 480]}
+            key = lambda p, **kw: plate.sequence_key(dict(job, camera_export=str(p), **kw), src)
+            self.assertEqual(key(a), key(b))
+            self.assertNotEqual(key(a), key(c))
+            self.assertNotEqual(key(a), key(a, samples=8))
+
+    def test_only_complete_sequences_count(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            self.assertFalse(plate.cached_sequence(folder, 10))
+            (folder / plate.SEQUENCE_DONE).write_text('{"frames": 10}')
+            self.assertTrue(plate.cached_sequence(folder, 10))
+            self.assertFalse(plate.cached_sequence(folder, 11))
+
+    def test_the_least_recently_used_go(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for i in range(5):
+                (root / f"s{i}").mkdir()
+                os.utime(root / f"s{i}", (1000 + i, 1000 + i))
+            dropped = plate.prune_sequences(root, 3, spare=root / "s0")
+            self.assertEqual(sorted(p.name for p in dropped), ["s1", "s2"])
+            self.assertEqual(sorted(p.name for p in root.iterdir()), ["s0", "s3", "s4"])
+            self.assertEqual(plate.prune_sequences(root / "none", 3), [])
+
+
 if __name__ == "__main__":
     unittest.main()
