@@ -30,7 +30,6 @@ echo "work folder: $WORK"
 
 python3 "$HERE/prep_chain.py" "$WORK/chain" --ffmpeg "$FFMPEG"
 "$FFMPEG" -v error -y -i "$CLIP" -frames:v "$FRAMES" -vf "scale=$W:$H:flags=lanczos,format=rgba" -f rawvideo "$WORK/clip.rgba"
-"$FFMPEG" -v error -y -f rawvideo -pix_fmt rgba -s ${W}x$H -i "$WORK/clip.rgba" -vf vflip -f rawvideo "$WORK/clip_up.rgba"
 N=$(( $(wc -c < "$WORK/clip.rgba") / (W * H * 4) ))
 
 echo "== the same frames: Blender against librashader-cli ($RUNTIME)"
@@ -41,13 +40,13 @@ for f in 0 $((N / 2)) $((N - 1)); do
     "$LIBRA" render -p "$REPO/tools/crt/slang-shaders/crt/crt-royale.slangp" -i "$WORK/f.png" -o "$WORK/lib.png" \
       -r "$RUNTIME" -d ${OW}x$OH --params "$(params $m)"
     "$FFMPEG" -v error -y -i "$WORK/lib.png" -f rawvideo -pix_fmt rgba "$WORK/lib.rgba"
-    "${BL[@]}" "$WORK/chain" "$WORK/f.rgba" $W $H $OW $OH "$(params $m)" "$WORK/bl.rgba" --top-down >/dev/null 2>&1
+    "${BL[@]}" "$WORK/chain" "$WORK/f.rgba" $W $H $OW $OH "$(params $m)" "$WORK/bl.rgba" >/dev/null 2>&1
     echo -n "frame $f, mask $m: "; "$BPY" "$HERE/frame_diff.py" "$WORK/lib.rgba" "$WORK/bl.rgba" $OW $OH
   done
 done
 
 echo "== speed, $N frames"
-"${BL[@]}" "$WORK/chain" "$WORK/clip_up.rgba" $W $H $OW $OH "$(params 0)" /dev/null 2>&1 | grep BLENDER_CRT
+"${BL[@]}" "$WORK/chain" "$WORK/clip.rgba" $W $H $OW $OH "$(params 0)" /dev/null 2>&1 | grep BLENDER_CRT
 if [ -z "${ENCODERS:-}" ]; then
   ENCODERS="prores_aw -profile:v 4 -pix_fmt yuva444p10le .mov"
   [ "$(uname)" = Darwin ] && ENCODERS="prores_videotoolbox -allow_sw 1 -profile:v 4444 -pix_fmt bgra .mov"
@@ -62,8 +61,8 @@ while IFS= read -r spec; do
   ext=${spec##* }; args=${spec% *}
   start=$(python3 -c 'import time; print(time.time())')
   # shellcheck disable=SC2086
-  "$FFMPEG" -v error -y -f rawvideo -pix_fmt rgba -s ${OW}x$OH -framerate 60 -i "$WORK/crt.fifo" -vf vflip -c:v $args "$WORK/out$ext" &
-  "${BL[@]}" "$WORK/chain" "$WORK/clip_up.rgba" $W $H $OW $OH "$(params 0)" "$WORK/crt.fifo" >/dev/null 2>&1
+  "$FFMPEG" -v error -y -f rawvideo -pix_fmt rgba -s ${OW}x$OH -framerate 60 -i "$WORK/crt.fifo" -c:v $args "$WORK/out$ext" &
+  "${BL[@]}" "$WORK/chain" "$WORK/clip.rgba" $W $H $OW $OH "$(params 0)" "$WORK/crt.fifo" >/dev/null 2>&1
   wait
   python3 -c "import time; t = time.time() - $start; print(f'Blender CRT into ${args%% *}: {t:.1f} s, {$N / t:.1f} frames/s')"
 done <<< "$ENCODERS"

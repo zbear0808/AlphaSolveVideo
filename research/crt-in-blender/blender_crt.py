@@ -2,15 +2,18 @@
 Runs inside Blender, in the background (gpu.init()), on whatever backend Blender uses: Metal, OpenGL or Vulkan.
 
     blender -b --factory-startup [--gpu-backend opengl] --python blender_crt.py -- CHAIN IN W H OUT_W OUT_H PARAMS OUT \
-        [--frames N] [--top-down]
+        [--frames N] [--passes N]
 
 CHAIN is prep_chain.py's folder. IN is raw RGBA frames of W x H, OUT gets raw RGBA frames of OUT_W x OUT_H (a file,
-a named pipe to an encoding ffmpeg, or /dev/null). PARAMS are the shader parameters, as render_video.py passes them
-(mask_type=0,mask_triad_size_desired=3,...).
+a named pipe to an encoding ffmpeg, or /dev/null), top row first both ways, as ffmpeg's rawvideo has them. PARAMS
+are the shader parameters, as render_video.py passes them (mask_type=0,mask_triad_size_desired=3,...).
 
-Rows: GPU textures are bottom-up. By default IN and OUT are bottom-up too, so no rows are copied in Python; flip
-them in ffmpeg on either side (`-vf vflip`), which costs nothing there. Flipping a 3504x2880 frame in numpy took
-0.12 s. --top-down flips in Python instead, for single frames compared against librashader-cli's.
+Rows go through unflipped. librashader puts an image's top row at texture coordinate v = 0 and reads the output
+back from v = 0 first; Blender's GPU module does the same with a buffer's first row, whatever the backend. crt-royale
+isn't symmetric top to bottom (its scanlines and mask start from the top edge), so flipping the frame on the way in
+and back on the way out gives a different picture: 0.8-1.7/255 from librashader's, against 0.2-0.4 unflipped.
+--passes N stops after the first N passes, the last of them drawn at OUT_W x OUT_H, as a preset cut to its first N
+passes draws: to find the pass where two renderers part.
 
 Prints one line: the compile time, frames per second, and each part's time per frame.
 
@@ -156,9 +159,9 @@ def copy_into(tex, fb):
 
 
 class Chain:
-    def __init__(self, folder: Path, params: dict, out_size):
+    def __init__(self, folder: Path, params: dict, out_size, passes=None):
         doc = json.loads((folder / "chain.json").read_text())
-        self.metas, self.out_size = doc["passes"], tuple(out_size)
+        self.metas, self.out_size = doc["passes"][:passes], tuple(out_size)
         self.params = dict(doc["params"], **params)
         t = time.time()
         self.passes = [Pass(m, (folder / f"p{m['id']}.vertex.glsl").read_text(),
@@ -168,7 +171,7 @@ class Chain:
         for lut in doc["luts"]:
             w, h = lut["size"]
             raw = np.frombuffer((folder / f"{lut['name']}.rgba").read_bytes(), dtype=np.uint8).reshape(h, w, 4)
-            flat = np.flipud(raw).astype(np.float32).ravel() / 255.0
+            flat = raw.astype(np.float32).ravel() / 255.0   # top row first, as librashader uploads images
             tex = gpu.types.GPUTexture((w, h), format="RGBA8", data=gpu.types.Buffer("FLOAT", flat.size, flat))
             tex.extend_mode(WRAP[lut["wrap"]])
             tex.filter_mode(lut["filter"] == "Linear")
@@ -185,8 +188,10 @@ class Chain:
             sizes.append(source)
         sizes[-1] = self.out_size
         self.targets = []
-        for m, s in zip(self.metas, sizes):
-            tex = gpu.types.GPUTexture(s, format=FORMATS.get(m["format"], "RGBA8"))
+        for i, (m, s) in enumerate(zip(self.metas, sizes)):
+            # the last pass draws into the output, plain 8-bit, whatever format the pass asks for
+            fmt = "RGBA8" if i == len(self.metas) - 1 else FORMATS.get(m["format"], "RGBA8")
+            tex = gpu.types.GPUTexture(s, format=fmt)
             self.targets.append((tex, gpu.types.GPUFrameBuffer(color_slots=(tex,))))
         self.copies, self.key = {}, src_size
 
@@ -256,13 +261,13 @@ def parse_params(text):
 
 def main():
     a = sys.argv[sys.argv.index("--") + 1:]
-    top_down = "--top-down" in a
     limit = int(a[a.index("--frames") + 1]) if "--frames" in a else None
-    a = [x for i, x in enumerate(a) if not x.startswith("--") and (i == 0 or a[i - 1] != "--frames")]
+    passes = int(a[a.index("--passes") + 1]) if "--passes" in a else None
+    a = [x for i, x in enumerate(a) if not x.startswith("--") and (i == 0 or a[i - 1] not in ("--frames", "--passes"))]
     folder, src, w, h, ow, oh, params, out = Path(a[0]), a[1], int(a[2]), int(a[3]), int(a[4]), int(a[5]), a[6], a[7]
     t0 = time.time()
     gpu.init()
-    chain = Chain(folder, parse_params(params), (ow, oh))
+    chain = Chain(folder, parse_params(params), (ow, oh), passes)
     setup = time.time() - t0
     n, t_draw, t_read, t_write = 0, 0.0, 0.0, 0.0
     t_start = time.time()
@@ -272,16 +277,13 @@ def main():
             if len(data) < w * h * 4:
                 break
             t = time.time()
-            pixels = np.frombuffer(data, dtype=np.uint8)
-            if top_down:
-                pixels = np.flipud(pixels.reshape(h, w, 4)).ravel()
-            flat = pixels.astype(np.float32) / 255.0
+            flat = np.frombuffer(data, dtype=np.uint8).astype(np.float32) / 255.0
             image = gpu.types.GPUTexture((w, h), format="RGBA8", data=gpu.types.Buffer("FLOAT", flat.size, flat))
             _, fb = chain.draw(image, n)
             t1 = time.time()
             with fb.bind():
                 px = fb.read_color(0, 0, ow, oh, 4, 0, "UBYTE")
-            frame = np.flipud(np.asarray(px).reshape(oh, ow, 4)).tobytes() if top_down else memoryview(px)
+            frame = memoryview(px)
             t2 = time.time()
             fout.write(frame)
             t_draw, t_read, t_write = t_draw + t1 - t, t_read + t2 - t1, t_write + time.time() - t2

@@ -41,7 +41,7 @@ Evidence tags, as in the other plans:
   | CRT in Blender → NVENC HEVC 4:4:4, with and without a matte file | — | 8.3–8.4 |
 
   For a 3-minute game (10,800 frames), the PC's CRT goes from about **4.3 hours** in ProRes to **28 minutes** (ProRes) or **19 minutes** (NVENC). The Mac's goes from about 42 to 14 minutes.
-- **Its frames are close to librashader's, not identical:** 0.8–1.7/255 apart on average, against librashader on two platforms 0.4–1.0/255 from each other. That's within the 1/255 bar on dark and mid-tone frames but not yet on bright ones. Closing the gap is part of the work (3.4). If it can't be closed, a small Rust program on librashader itself is the fallback (3.6).
+- **Its frames match librashader's:** 0.003/255 apart on average on the Mac, far inside the 1/255 bar, and closer than librashader's own runtimes are to each other (0.4–1.0/255). A first version was 0.8–1.7/255 off because it flipped the frames upside down (3.4). The PC is to measure again. A small Rust program on librashader itself stays the fallback (3.6).
 - **The plan, in order** (section 7):
   1. NVENC and `prores_aw` on the PC.
   2. The CRT in Blender, as `tools/crt`'s renderer.
@@ -100,11 +100,11 @@ It's in [`research/crt-in-blender/`](../research/crt-in-blender/README.md):
 
   It reads raw frames from a file or pipe and writes raw frames to one.
 - **One rewrite** is needed, for Metal only: Blender's GLSL-to-Metal translation can't copy a whole array (`vec3 a[9] = b;`, in crt-royale's last pass). OpenGL and Vulkan compile all 12 passes as they are [verified].
-- **Rows stay bottom-up,** as GPU textures are. ffmpeg flips them on both sides (`-vf vflip`) for free. Flipping in numpy cost 0.12 s a frame [verified].
+- **Rows go through in the order they come,** top row first, as ffmpeg's raw frames have them. librashader puts an image's top row at v = 0 and reads the output back from there, and so does Blender's GPU module with a buffer's first row [verified: 3.4]. No flip is needed anywhere.
 
 ### 3.3 Speed
 
-All [verified], 120 frames of 584×480 drawn at 3504×2880, grille mask (`compare.sh`):
+All [verified], 120 frames of 584×480 drawn at 3504×2880, grille mask (`compare.sh`). In these runs the frames were flipped upside down by ffmpeg on the way in and out, which cost nothing, so the speeds stand without the flip:
 
 - **Compiling the preset** takes 0.07–0.25 s, once per video. Today that cost is paid on every frame.
 - **Each frame:** upload and draw 3–5 ms, read-back 24–38 ms.
@@ -115,20 +115,16 @@ All [verified], 120 frames of 584×480 drawn at 3504×2880, grille mask (`compar
 
 Against `librashader-cli` on the same machine, frames 0, 60 and 119 of a clip, each mask [verified]:
 
-| | Mean difference | Largest | PSNR |
-|---|---|---|---|
-| Mac: Metal, against `librashader-cli`'s Metal | 0.82–1.71/255 | 30–54 | 37–42 dB |
-| PC: OpenGL on the GTX 1060, against `librashader-cli`'s wgpu on the same GPU | 1.02–1.68/255 | 31–60 | 37–41 dB |
-| For reference: `librashader-cli`, the PC's wgpu against the Mac's Metal | 0.42/255 (one frame); 0.80–1.0 on a 30-frame clip (`tools/crt/README.md`) | 31 | 49 dB |
+| | Mean difference | Largest | Pixels that differ at all | PSNR |
+|---|---|---|---|---|
+| **Mac: Metal, against `librashader-cli`'s Metal** | **0.003/255** | 15–34 | 0.36% (0.01% by more than 4/255) | 66–70 dB |
+| PC: OpenGL on the GTX 1060, against `librashader-cli`'s wgpu | To measure again with the fix [to test] | | | |
+| For reference: `librashader-cli`, the PC's wgpu against the Mac's Metal | 0.42/255 (one frame); 0.80–1.0 on a 30-frame clip (`tools/crt/README.md`) | 31 | | 49 dB |
 
-- Side by side, the pictures can't be told apart: same scanlines, triads, bloom and halation. The differences are spread over the whole frame, not in any one feature, and they grow with brightness: bright frames are 1.4–1.7/255 off, dark ones 0.8–1.0.
-- **Known gaps, to close** [to test]:
-  - **Mip levels.** crt-royale's last pass reads its input with mipmaps (`mipmap_input11`), and Blender's Python can't build mip levels. This is the most likely cause.
-  - **Rounding.** Precision through the eight sRGB framebuffers.
-  - **The border colour** of `ClampToBorder`.
-
-  Mip levels can be built with a small downsampling pass of our own.
-- **The bar:** a mean of 1/255 or less on every test frame and mask, against `librashader-cli` on the same machine.
+- **The bar is met** on the Mac, by a wide margin: 0.003/255 against the agreed 1/255. Blender's frames are closer to librashader's than librashader's own runtimes are to each other.
+- **What it took.** The first version flipped every frame and the mask textures upside down, assuming GPU textures are bottom-up. crt-royale isn't symmetric top to bottom (its scanlines and mask start from the top edge), so the flip moved them: 0.8–1.7/255. Cutting the preset to its first N passes in both renderers found the first difference at the bloom pass's resize, where the flipped sample positions fell on different texels.
+- **Mip levels don't matter here.** crt-royale's last pass reads its input with mipmaps, and Blender's Python can't build them. But at this size that pass samples at full resolution, so the mip levels are never read [verified: the 0.003/255].
+- **The bar to keep:** a mean of 1/255 or less on every test frame and mask, against `librashader-cli` on the same machine. The tests in L2 check it.
 
 ### 3.5 What else moves to the GPU there
 
@@ -138,7 +134,7 @@ Against `librashader-cli` on the same machine, frames 0, 60 and 119 of a clip, e
 
 ### 3.6 The fallback: a Rust program on librashader
 
-If the accuracy gap can't be closed, the other way to keep the preset loaded is `crt-stream`: a small Rust program on the `librashader` crate (runtime-vk on Linux, runtime-mtl on the Mac), with the same pipes in and out.
+If the Blender CRT ever can't keep within the bar (a later Blender, another GPU), the other way to keep the preset loaded is `crt-stream`: a small Rust program on the `librashader` crate (runtime-vk on Linux, runtime-mtl on the Mac), with the same pipes in and out.
 
 - **For:** it would give librashader's own frames.
 - **Against:** it needs Rust to build. The PC has none; it would build in the `asv-linux` container, as `librashader-cli` is [verified]. It's also 2–3 days instead of 1–1.5.
@@ -209,14 +205,14 @@ This saves about 2 ms a frame and a temporary file, so it's tidying more than sp
 | # | Step | Effort | Where |
 |---|---|---|---|
 | L1 | FFmpeg 8.1 on the PC; `prores_aw` and NVENC in `video_encoder` and `composite`; render tests with them | 0.5 day | The PC |
-| L2 | The CRT in Blender, in `tools/crt`: <br>- `render_video.render` uses it when Blender is there, `librashader-cli` otherwise; <br>- a writer thread; <br>- alpha on the GPU; <br>- close the accuracy gap; <br>- tests against `librashader-cli` for each mask, with and without alpha | 1.5–2 days | The PC, then the Mac |
+| L2 | The CRT in Blender, in `tools/crt`: <br>- `render_video.render` uses it when Blender is there, `librashader-cli` otherwise; <br>- a writer thread; <br>- alpha on the GPU; <br>- check the PC's accuracy again without the flip; <br>- tests against `librashader-cli` for each mask, with and without alpha | 1.5–2 days | The PC, then the Mac |
 | L3 | The matte file with NVENC `.mp4` (`--format mp4` with transparency) | 0.5 day | The PC |
 | L4 | The model: duplicate frames, the plate cache, the settings sweep, freezing the scene | 1–1.5 days | The PC, then the Mac |
 | L5 | One ffmpeg from the plates and fighters to the CRT (section 6) | 0.5 day | Anywhere |
 | L6 | Docs: `slp2video.md`'s speed table, `tools/crt/README.md`, this plan's status | 0.25 day | Anywhere |
 | **Total** | | **4.25–5.25 days** | |
 
-If L2's accuracy can't be brought within 1/255, swap in `crt-stream` (3.6): 2–3 days instead of 1.5–2.
+If a platform's Blender CRT can't be kept within 1/255, swap in `crt-stream` (3.6) there: 2–3 days.
 
 ## 8. Risks
 
