@@ -157,6 +157,8 @@ Blender's frames against `librashader-cli`'s on the same machine. Each row is 3 
 | Shadow steps 6 → 2 | 234 ms | 133 ms | 0.03 / 1 |
 | No fast GI | 233 ms | 134 ms | 0.00 / 0 |
 | Fast GI at a quarter resolution | 234 ms | 136 ms | 0.00 / 0 |
+| No ray tracing (the project's own setting; plate.py turns it on for metal) | 199 ms | 120 ms | 2.95 / 77 |
+| No shadows, no ray tracing | 69 ms | 74 ms | 2.84 / 73 |
 | 1 sample | 76 ms | 67 ms | 7.5 / 98 |
 | Cel finish: today | 206 ms | 114 ms | reference |
 | **Cel finish: no shadows** | **67 ms** | **65 ms** | 0.00 / 0 (identical) |
@@ -165,6 +167,10 @@ Blender's frames against `librashader-cli`'s on the same machine. Each row is 3 
 - **Without them, the logo hardly changes.** The project's area lights barely shadow the letters onto each other: 0.21/255 on the plate. After the CRT, flattened onto black, it's 0.08–0.14/255 in the logo's box, far inside the bar.
 - **The cel finish is emission only,** so shadows change none of its pixels: 40 frames identical.
 - **Fast GI costs nothing measurable** here.
+- **Ray tracing stays on for the metal logo.** Its polished faces mirror the studio through it: without it they're 3/255 off on average, 77 at the 99th percentile, a visibly different metal. With shadows already off it costs little: 87 → 69 ms on the Mac, and nothing on the PC (90 → 74 ms with OpenGL, 75 → 74 with Vulkan).
+- **It's EEVEE throughout,** never Cycles: `blender_plate.py` sets the engine for every plate. On the Mac Blender draws with Metal. On the PC it chooses its OpenGL backend by itself, on the GTX 1060.
+  - Its Vulkan backend (`--gpu-backend vulkan`) drew a frame without shadows in 75 ms against OpenGL's 90. But a whole model step of 240 frames took 16 s against 17, and its frames are 0.07–0.30/255 from OpenGL's.
+  - So OpenGL stays the default. With shadows on, Vulkan was slower: 167 ms against 135.
 - **What it changed** [committed]:
   - the cel finish is drawn without shadows;
   - the logo through the moving camera is too, unless `--model-shadows`;

@@ -1,0 +1,47 @@
+[
+ {
+  "variant": "today (16 samples)",
+  "eevee": {},
+  "frames": 40,
+  "wall": 11.2,
+  "first_frame_at": 1.703,
+  "per_frame": 0.228
+ },
+ {
+  "variant": "no shadows",
+  "eevee": {
+   "use_shadows": false
+  },
+  "frames": 40,
+  "wall": 5.1,
+  "first_frame_at": 1.275,
+  "per_frame": 0.087,
+  "mean_on_logo": 0.211,
+  "p99_on_logo": 6.0
+ },
+ {
+  "variant": "no ray tracing",
+  "eevee": {
+   "use_raytracing": false
+  },
+  "frames": 40,
+  "wall": 9.5,
+  "first_frame_at": 1.277,
+  "per_frame": 0.199,
+  "mean_on_logo": 2.951,
+  "p99_on_logo": 77.0
+ },
+ {
+  "variant": "no shadows, no ray tracing",
+  "eevee": {
+   "use_shadows": false,
+   "use_raytracing": false
+  },
+  "frames": 40,
+  "wall": 4.3,
+  "first_frame_at": 1.141,
+  "per_frame": 0.069,
+  "mean_on_logo": 2.838,
+  "p99_on_logo": 73.0
+ }
+]
