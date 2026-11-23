@@ -54,7 +54,7 @@ With `--static-camera` the model is rendered once, as the stage's fixed camera s
 
 The moving camera's frames are cached too (`logo-stage/sequences/`), by everything they depend on: the camera export's contents, the model, its finish, fit and samples, and the code. Rendering the same clip again with another CRT mask, colour or format then skips Blender. The last 3 clips are kept, about 1.8 GB each for a 3-minute game; `--model-cache N` keeps N, and 0 none.
 
-With the moving camera, `render --export-camera` writes the game's camera on every frame ([camera-export.md](camera-export.md)), and Blender renders the model through it, one picture per video frame. Two Blender processes share the frames (`--model-jobs`), with 16 samples per frame (`--model-samples`): about 4.4 frames a second at 640x480 on an M1 and 9 on a GTX 1060, so a 4 s clip takes 54 s and 26 s. The cel finish (`--model-cel`, the default with `--animelee`) is about three times as fast: it's emission only, so it's drawn without shadows, which changed none of its pixels. Fewer samples would show: after the CRT, 8 samples are 1.2/255 from 64 on the model, 16 samples 0.8 ([`report-gpu-crt.md`](report-gpu-crt.md)). A camera export labels its videos exactly 60 fps, and so does the result.
+With the moving camera, `render --export-camera` writes the game's camera on every frame ([camera-export.md](camera-export.md)), and Blender renders the model through it, one picture per video frame. Two Blender processes share the frames (`--model-jobs`), with 16 samples per frame (`--model-samples`). The logo is drawn without EEVEE's shadows through the moving camera: they changed it by 0.1/255 after the CRT, at more than twice the time (`--model-shadows` brings them back; other models keep theirs, `--no-model-shadows` drops them). That's about 13 frames a second at 640x480 on an M1 and 14 on a GTX 1060, so a 4 s clip takes 17–18 s. The cel finish (`--model-cel`, the default with `--animelee`) is emission only, so it's always drawn without shadows, which change none of its pixels. Fewer samples would show: after the CRT, 8 samples are 1.2/255 from 64 on the model, 16 samples 0.8 ([`report-gpu-crt.md`](report-gpu-crt.md)). A camera export labels its videos exactly 60 fps, and so does the result.
 
 Checked with a flat card fitted to Battlefield, through the moving camera: its top edge was where the game's camera puts the stage's top to within -0.03 ± 0.06 px (worst 0.16 px) on all 300 frames of a clip at 640x528, and -0.02 ± 0.06 px (worst 0.14 px) on 120 frames of a raw 640x480 recording, and the fighters stand on it. A still plate and the first frame of a moving one from the fixed camera's export are the same picture (alpha differs by at most 3/255, centroid within 0.002 px). The plates are rendered without EEVEE's overscan, which moved the picture off the camera's projection: by up to 0.5 px at 640x528 and 1.6 px with a raw recording's non-square pixels.
 
@@ -91,7 +91,7 @@ Everything `slp2video` runs is in this repo: the render (`tools/slp2alpha`), the
 
 Blender is found as given (`--blender`, `$BLENDER`), then in `/Applications` or `~/Applications`, in Program Files or Steam on Windows, on the PATH, in `~/.local/bin` (where a Linux download is often linked, and which an SSH command doesn't put on the PATH) and in `/snap/bin`.
 
-What's left: on Linux, the model's speed (Blender's EEVEE is now the longest step; [`plan-gpu-crt-model.md`](plan-gpu-crt-model.md) step L4), and choosing the GPU with one option (`--gpu`, [`plan-linux-gpu.md`](plan-linux-gpu.md) step G5). On Windows, everything after the Dolphin build ([`plan-windows-remaining.md`](plan-windows-remaining.md), step 7 for `slp2video`), and the CRT is still drawn by `librashader-cli` there. `.github/workflows/crt.yml` builds `librashader-cli` and tests the CRT, including a real render, on Windows, Linux and macOS runners, when it's run by hand from the Actions tab.
+What's left: on Linux, choosing the GPU with one option (`--gpu`, [`plan-linux-gpu.md`](plan-linux-gpu.md) step G5); on the PC the CRT's ProRes encoder and the render are now the longest steps. On Windows, everything after the Dolphin build ([`plan-windows-remaining.md`](plan-windows-remaining.md), step 7 for `slp2video`), and the CRT is still drawn by `librashader-cli` there. `.github/workflows/crt.yml` builds `librashader-cli` and tests the CRT, including a real render, on Windows, Linux and macOS runners, when it's run by hand from the Actions tab.
 
 ## Speed
 
@@ -102,11 +102,11 @@ For a 4 s clip (240 frames) with the logo through the moving camera and the CRT,
 | Render (flicker and solve) | 9 s | 16 s |
 | Render with `--keep-background` | about 5 s | — |
 | Model, fixed camera | 2 to 3 s, once per stage, finish and size | — |
-| Model, moving camera (2 Blender processes, 16 samples) | 54 s | 26 s |
+| Model, moving camera (2 Blender processes, 16 samples, the logo without shadows) | 18 s | 17 s |
 | Composite | 1 s | 2 s |
-| CRT, Blender's GPU module | 17 s (ProRes) | 28 s (ProRes), 16 s (`.mp4`, NVENC) |
+| CRT, Blender's GPU module | 13–17 s (ProRes) | 27–28 s (ProRes), 16–17 s (`.mp4`, NVENC) |
 | CRT, `librashader-cli` | 58 s | 119 s |
-| All of it | 82 s | 72 s (`.mp4`: 58 s) |
+| All of it | 41 s | 60 s (`.mp4`: 49 s) |
 
 ## Files
 

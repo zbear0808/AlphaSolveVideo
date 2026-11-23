@@ -1,10 +1,11 @@
 # Report: the CRT on the GPU, and the faster encoders
 
-22 November 2026. Measurements of the work in [`plan-gpu-crt-model.md`](plan-gpu-crt-model.md) steps L1–L3:
+22 November 2026. Measurements of the work in [`plan-gpu-crt-model.md`](plan-gpu-crt-model.md) steps L1–L4:
 
 - **L1:** `prores_aw` and NVENC as encoders, with FFmpeg 8.1 on the Linux PC;
 - **L2:** CRT Royale drawn by Blender's GPU module in one process (`--runtime blender`), instead of one `librashader-cli` run per frame;
-- **L3:** the matte file for transparent `.mp4`.
+- **L3:** the matte file for transparent `.mp4`;
+- **L4:** the model's EEVEE settings.
 
 The scripts and raw results are in [`research/crt-in-blender/`](../research/crt-in-blender/README.md).
 
@@ -22,11 +23,13 @@ The scripts and raw results are in [`research/crt-in-blender/`](../research/crt-
   \* Measured on 120 frames of a 4-player clip with every pixel drawn (`research/crt-in-blender/README.md`), so comparable with the whole-game rows.
 
 - **Blender's frames are librashader's.** On the PC, on the same GPU, they're 0.0002/255 apart on average for every mask, frame and input. On the Mac they're 0.005/255 apart. The agreed bar was 1/255.
-- **A whole `slp2video --model logo --crt` run** of 4 s of play:
-  - PC: **165 s → 72 s** (ProRes), or **58 s** (`.mp4`);
-  - Mac: **120 s → 82 s**.
-- **The model (Blender's EEVEE) is now the slowest step** on both machines: 26 s of the PC's 72, and 54 s of the Mac's 82.
-- **Its 16 samples stay.** After the CRT, 16 samples are 0.8–0.9/255 from 64 on the logo itself, inside the bar. 8 samples are 1.2–1.3/255, outside it.
+- **The model (Blender's EEVEE) was then the slowest step,** so step L4 measured it (section 6):
+  - **16 samples stay.** After the CRT, 16 samples are 0.8–0.9/255 from 64 on the logo itself, inside the bar. 8 samples are 1.2–1.3/255, outside it.
+  - **Shadows go,** for the logo and the cel finish. They cost more than half of each frame on the Mac and a third on the PC, and change the logo by 0.1/255 after the CRT (the cel finish not at all).
+  - **The moving camera's frames are cached,** so a rerun of the same clip skips Blender.
+- **A whole `slp2video --model logo --crt` run** of 4 s of play, before this work and now:
+  - PC: **165 s → 60 s** (ProRes), **49 s** as `.mp4`;
+  - Mac: **120 s → 41 s**.
 - **For a 3-minute game** (10,800 frames), the CRT step on the PC goes from about 4.3 hours (before L1) to 22–31 minutes in ProRes, or 14–15 minutes in `.mp4`.
 - **The Mac's `.mp4` is its slowest output** (1.2 frames/s on whole-game frames). `libx264` 4:4:4 does the encoding, and there's no hardware H.264 4:4:4 encoder on a Mac. Prefer ProRes there.
 
@@ -49,7 +52,7 @@ The scripts and raw results are in [`research/crt-in-blender/`](../research/crt-
 - **Scripts:**
   - `bench.py` for all of the above;
   - `e2e.sh` for whole `slp2video` runs;
-  - `samples.sh` and `model_diff.py` for the model's samples.
+  - `samples.sh` and `model_diff.py` for the model's samples, `eevee_sweep.py` for its other settings.
 
 ## 3. The CRT step
 
@@ -112,7 +115,7 @@ Blender's frames against `librashader-cli`'s on the same machine. Each row is 3 
 
 ## 4. The whole of `slp2video`
 
-`slp2video --model logo --crt`: frames 1500–1739 with the logo through the moving camera, `.mov` unless marked (`e2e.sh`).
+`slp2video --model logo --crt`: frames 1500–1739 with the logo through the moving camera, `.mov` unless marked (`e2e.sh`). This is after L1–L3 and before L4; section 6 has the runs after it.
 
 | Step | Mac, Blender CRT | Mac, `librashader-cli` CRT | PC, Blender CRT | PC, `librashader-cli` CRT | PC, Blender CRT, `.mp4` |
 |---|---|---|---|---|---|
@@ -123,7 +126,7 @@ Blender's frames against `librashader-cli`'s on the same machine. Each row is 3 
 | **Total** | **82 s** | 120 s | **72 s** | 165 s | **58 s** |
 | Output | 1.2 GB | 1.2 GB | 918 MB | 918 MB | 110 MB |
 
-- **The model is now the longest step.** On the PC with NVIDIA's driver it's twice the Mac's speed: 26 s against 54 s for 240 frames. The PC's first run with this driver, on 20 November, took 58 s for 120 frames. Part of that may have been Blender compiling its shaders for the first time [to check].
+- **The model was then the longest step,** before L4 (section 6). On the PC with NVIDIA's driver it was twice the Mac's speed: 26 s against 54 s for 240 frames. The PC's first run with this driver, on 20 November, took 58 s for 120 frames. Most of that was likely Blender compiling its shaders for the first time: a first run after a settings change took 10–11 s longer than the next (section 6).
 - **The render** (Dolphin and the solver) is slower on the PC than on the Mac. That's the CPU, which this work doesn't touch.
 - The PC's ProRes file is smaller than the Mac's for the same frames: `prores_aw` against Apple's encoder.
 
@@ -140,16 +143,56 @@ Blender's frames against `librashader-cli`'s on the same machine. Each row is 3 
 
 - **The CRT doesn't hide the noise.** The difference after it is about what it was on the plate: its beam and mask spread each pixel, but keep its brightness.
 - **16 samples is the fewest inside the 1/255 bar.** The default stays.
-- **Fewer samples would save little on the PC anyway** (9 s → 7 s). At 640×480, what's left is EEVEE's fixed cost per frame: setting up the scene, shadows and the HDRI, and writing the PNG. That's where step L4 should look next: skipping frames whose camera hasn't moved, freezing the scene, and cheaper shadows. The cost of starting each Blender process is part of it too: for 60 frames the 64-sample run at 21 s is mostly not sampling.
+- **Fewer samples would save little on the PC anyway** (9 s → 7 s). At 640×480, what's left is EEVEE's fixed cost per frame, which section 6 looks into. The cost of starting each Blender process is part of it too: for 60 frames the 64-sample run at 21 s is mostly not sampling.
 
-## 6. What changes because of this
+## 6. The model's other settings (L4)
+
+`eevee_sweep.py`: 40 frames of the metal logo through the reference camera export, at 16 samples. Each setting is changed on its own against today's. Time per frame is the median after the first frame; the difference is from today's frames, on the logo, worst of 3 frames.
+
+| Variant | Per frame, Mac | Per frame, PC | On the logo: mean / 99th percentile |
+|---|---|---|---|
+| Today (the project's shadows, fast GI) | 237 ms | 137 ms | reference |
+| **No shadows** | **103 ms** | **89 ms** | 0.21 / 6 |
+| Shadows at half resolution | 236 ms | 135 ms | 0.20 / 5 |
+| Shadow steps 6 → 2 | 234 ms | 133 ms | 0.03 / 1 |
+| No fast GI | 233 ms | 134 ms | 0.00 / 0 |
+| Fast GI at a quarter resolution | 234 ms | 136 ms | 0.00 / 0 |
+| 1 sample | 76 ms | 67 ms | 7.5 / 98 |
+| Cel finish: today | 206 ms | 114 ms | reference |
+| **Cel finish: no shadows** | **67 ms** | **65 ms** | 0.00 / 0 (identical) |
+
+- **Shadows cost more than half of each metal frame on the Mac, and a third on the PC.** Making them cheaper (resolution, steps) saves nothing: it's having them at all that costs.
+- **Without them, the logo hardly changes.** The project's area lights barely shadow the letters onto each other: 0.21/255 on the plate. After the CRT, flattened onto black, it's 0.08–0.14/255 in the logo's box, far inside the bar.
+- **The cel finish is emission only,** so shadows change none of its pixels: 40 frames identical.
+- **Fast GI costs nothing measurable** here.
+- **What it changed** [committed]:
+  - the cel finish is drawn without shadows;
+  - the logo through the moving camera is too, unless `--model-shadows`;
+  - other models keep theirs, since they weren't measured, unless `--no-model-shadows`.
+- **Frames whose camera hasn't moved** were to be skipped. But in a whole game's camera export (7,651 frames) only 3 repeat the frame before, at the very start, so there's nothing to skip. Melee's camera is always moving a little.
+- **The moving camera's frames are cached now** (`logo-stage/sequences/`), keyed on the camera export's contents and everything else they depend on. The same clip with another mask, colour or format skips Blender: 18 s → 10 s for 60 cel frames on the Mac. The last 3 clips are kept (`--model-cache`).
+- **The first run after a change of settings** spends 10–11 s compiling Blender's shaders for them. Blender then keeps them in its cache (`~/.cache/blender`), so later runs don't.
+
+Whole runs again, 240 frames, `--model logo --crt`, without the cache:
+
+| | Mac M1 | PC, `.mov` | PC, `.mp4` |
+|---|---|---|---|
+| Before this work: `librashader-cli`, the project's shadows | 120 s | 165 s | — |
+| After L1–L3 (section 4) | 82 s | 72 s | 58 s |
+| **After L4: model** | **18 s** (was 54) | **17 s** (was 26) | **16 s** (was 25) |
+| **After L4: all of it** | **41 s** | **60 s** | **49 s** |
+
+On the PC, the CRT into `prores_aw` (27 s) is now the longest step of a `.mov` run, and the render (Dolphin and the solver, 14 s) the next.
+
+## 7. What changes because of this
 
 - **`--runtime blender` stays the default on macOS and Linux,** as committed. The measurements confirm both its speed and its accuracy.
 - **NVENC's settings stay:** constant QP 12, H.264 4:4:4. On real CRT frames it beat `libx264` CRF 12 in quality at 7 times the speed (section 4 of the plan).
 - **On the Mac, prefer ProRes to `.mp4` for long CRT renders.** Both docs now say so.
-- **Next: step L4, the model.** It's now the longest step on both machines.
+- **The model keeps 16 samples, but drops shadows** for the logo and the cel finish (section 6).
+- **On the PC, `.mp4` is the fastest way through:** NVENC keeps the CRT at 12–13 frames/s, against `prores_aw`'s 6–8.
 
-## 7. Not measured
+## 8. Not measured
 
 - Windows, which still draws with `librashader-cli`.
 - Whole games, rather than 4 s clips. A clip's numbers include each step's start-up: Blender's 0.1–0.9 s and the preset's compile, and Dolphin's start. A whole game should run a little faster per frame.

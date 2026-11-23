@@ -11,6 +11,8 @@ Can CRT Royale run inside Blender, so that `slp2video --crt` keeps the preset lo
 | `bench.py` | `tools/crt`'s CRT step on a real render (transparent fighters, and the whole game), with Blender and with `librashader-cli`, into ProRes and H.264 with its matte: time, CPU, video memory, size, and accuracy for each mask. The numbers in [`docs/report-gpu-crt.md`](../../docs/report-gpu-crt.md); its results are in `results/` |
 | `e2e.sh` | All of `slp2video --model logo --crt`, step by step, with each CRT runtime |
 | `samples.sh`, `model_diff.py` | The model's EEVEE samples against the final CRT picture, measured on the model |
+| `eevee_sweep.py` | The logo plate through the moving camera with each EEVEE setting changed on its own: time per frame, and the difference on the logo |
+| `scene_probe.py`, `scene_probe2.py` | Inside Blender: what the logo project animates, renders and lights with |
 
 The prototype (`prep_chain.py`, this folder's `blender_crt.py`, `compare.sh`) became `tools/crt`'s `--runtime blender`; `bench.py`, `e2e.sh` and `samples.sh` measure that one.
 

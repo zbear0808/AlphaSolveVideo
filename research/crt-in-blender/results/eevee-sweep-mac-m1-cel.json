@@ -1,0 +1,34 @@
+[
+ {
+  "variant": "today (16 samples)",
+  "eevee": {},
+  "frames": 40,
+  "wall": 10.5,
+  "first_frame_at": 1.822,
+  "per_frame": 0.206
+ },
+ {
+  "variant": "1 sample",
+  "eevee": {
+   "taa_render_samples": 1
+  },
+  "frames": 40,
+  "wall": 4.7,
+  "first_frame_at": 1.261,
+  "per_frame": 0.073,
+  "mean_on_logo": 1.683,
+  "p99_on_logo": 45.0
+ },
+ {
+  "variant": "no shadows",
+  "eevee": {
+   "use_shadows": false
+  },
+  "frames": 40,
+  "wall": 4.6,
+  "first_frame_at": 1.417,
+  "per_frame": 0.067,
+  "mean_on_logo": 0.0,
+  "p99_on_logo": 0.0
+ }
+]

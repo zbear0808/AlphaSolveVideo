@@ -1,0 +1,82 @@
+[
+ {
+  "variant": "today (16 samples)",
+  "eevee": {},
+  "frames": 40,
+  "wall": 11.5,
+  "first_frame_at": 1.832,
+  "per_frame": 0.237
+ },
+ {
+  "variant": "1 sample",
+  "eevee": {
+   "taa_render_samples": 1
+  },
+  "frames": 40,
+  "wall": 4.8,
+  "first_frame_at": 1.322,
+  "per_frame": 0.076,
+  "mean_on_logo": 7.498,
+  "p99_on_logo": 97.7
+ },
+ {
+  "variant": "no shadows",
+  "eevee": {
+   "use_shadows": false
+  },
+  "frames": 40,
+  "wall": 5.9,
+  "first_frame_at": 1.31,
+  "per_frame": 0.103,
+  "mean_on_logo": 0.211,
+  "p99_on_logo": 6.0
+ },
+ {
+  "variant": "shadows at half resolution",
+  "eevee": {
+   "shadow_resolution_scale": 0.5
+  },
+  "frames": 40,
+  "wall": 11.4,
+  "first_frame_at": 1.607,
+  "per_frame": 0.236,
+  "mean_on_logo": 0.2,
+  "p99_on_logo": 5.0
+ },
+ {
+  "variant": "shadow steps 6 -> 2",
+  "eevee": {
+   "shadow_step_count": 2
+  },
+  "frames": 40,
+  "wall": 11.9,
+  "first_frame_at": 2.14,
+  "per_frame": 0.234,
+  "mean_on_logo": 0.028,
+  "p99_on_logo": 1.0
+ },
+ {
+  "variant": "no fast GI",
+  "eevee": {
+   "use_fast_gi": false
+  },
+  "frames": 40,
+  "wall": 11.3,
+  "first_frame_at": 1.566,
+  "per_frame": 0.233,
+  "mean_on_logo": 0.0,
+  "p99_on_logo": 0.0
+ },
+ {
+  "variant": "fast GI at quarter resolution",
+  "eevee": {
+   "fast_gi_resolution": "4"
+  },
+  "frames": 40,
+  "wall": 12.1,
+  "first_frame_at": 2.385,
+  "per_frame": 0.234,
+  "mean_on_logo": 0.0,
+  "p99_on_logo": 0.0
+ }
+]
