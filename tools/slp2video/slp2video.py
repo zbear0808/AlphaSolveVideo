@@ -335,12 +335,14 @@ def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, 
     print(f"CRT: {info['frames']} frames of {width}x{lines} -> {settings.width}x{settings.height} "
           f"({settings.scale} px per scanline, {args.crt_mask} mask)")
     out.parent.mkdir(parents=True, exist_ok=True)
+    t0 = time.monotonic()
     _, runtime = crt.render(video, out, settings, ffmpeg=ffmpeg, librashader=librashader, input_size=(width, lines),
                             rate=rate, prefilter=f"{crt.frame_clock(rate)},{squeeze}", alpha=plan.transparent,
                             codec="h264-444" if args.format == "mp4" else "prores4444", runtime=args.crt_runtime,
                             jobs=args.crt_jobs, total=info["frames"], on_progress=Progress("CRT"),
                             work=work / "crt", blender=blender)
-    print("CRT: drawn by Blender's GPU module" if runtime == "blender" else f"CRT: drawn with librashader's {runtime} runtime")
+    how = "by Blender's GPU module" if runtime == "blender" else f"with librashader's {runtime} runtime"
+    print(f"CRT: drawn {how} in {time.monotonic() - t0:.0f} s")
     got = video_info(ffprobe, out)["frames"]
     if got != info["frames"]:
         print(f"  warning: the CRT video has {got} frames, the picture {info['frames']}", file=sys.stderr)
