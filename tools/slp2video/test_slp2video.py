@@ -134,6 +134,13 @@ class Models(unittest.TestCase):
         self.assertFalse(plan("--model", "x.glb", "--static-camera").export_camera)
         self.assertFalse(plan().export_camera)
 
+    def test_shadows_off_for_the_logo_through_the_moving_camera(self):
+        shadows = lambda *a: slp2video.moving_shadows(options(*a), plan(*a))
+        self.assertFalse(shadows("--model", "logo"))
+        self.assertTrue(shadows("--model", "logo", "--model-shadows"))
+        self.assertTrue(shadows("--model", "x.glb"))
+        self.assertFalse(shadows("--model", "x.glb", "--no-model-shadows"))
+
     def test_rotation(self):
         self.assertEqual(plate.rotation("90"), 90.0)
         self.assertEqual(plate.rotation("90,0,45"), [90.0, 0.0, 45.0])

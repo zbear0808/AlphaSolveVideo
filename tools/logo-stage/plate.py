@@ -110,7 +110,8 @@ def make_job(stage: int, style: str, scale: int, out: Path, *, iso: Optional[str
              render: bool = True, report: Optional[Path] = None, size: Optional[Tuple[int, int]] = None,
              raw: bool = False, model: Optional[Path] = None, model_objects: Sequence[str] = (),
              model_rotation=0.0, model_scale: float = 1.0,
-             camera_export: Optional[Path] = None, eevee: Optional[dict] = None) -> dict:
+             camera_export: Optional[Path] = None, eevee: Optional[dict] = None,
+             shadows: bool = True) -> dict:
     """size: the recording's (width, height), by default what Dolphin records at `scale` (raw: unstretched).
     model_rotation: degrees about the vertical, or [x, y, z] Euler angles in degrees."""
     geo = stagedata.load_stage(stage, iso)
@@ -137,6 +138,8 @@ def make_job(stage: int, style: str, scale: int, out: Path, *, iso: Optional[str
         job["camera_export"] = str(Path(camera_export).resolve())
     if eevee:
         job["eevee"] = dict(eevee)
+    if not shadows:
+        job["shadows"] = False
     return job
 
 

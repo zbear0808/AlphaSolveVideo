@@ -279,6 +279,15 @@ def model_kw(args, plan: Plan) -> dict:
                 model_rotation=args.model_rotation, model_scale=args.model_scale)
 
 
+def moving_shadows(args, plan: Plan) -> bool:
+    """EEVEE's shadows for the moving camera's plate. Off for the metal logo unless --model-shadows: after the CRT
+    they changed 0.08-0.14/255 of it, and cost 57% of each frame on an M1, 35% on a GTX 1060
+    (docs/report-gpu-crt.md). On for any other model, whose shadows weren't measured, unless --no-model-shadows."""
+    if args.model_shadows is not None:
+        return args.model_shadows
+    return plan.model != "logo"
+
+
 def model_plate(args, plan: Plan, stage_id: int, size: Tuple[int, int], camera_json: Optional[Path],
                 work: Path) -> Path:
     """The model as the game's camera sees it: one PNG for the fixed camera (cached, like the logo stage's), or a
@@ -302,6 +311,7 @@ def model_plate(args, plan: Plan, stage_id: int, size: Tuple[int, int], camera_j
         raise RuntimeError("slp2alpha wrote no camera export, which the moving camera needs")
     frames, _ = plate.camera_export_frames(camera_json)
     samples = args.model_samples or MOVING_SAMPLES
+    kw["shadows"] = moving_shadows(args, plan)
     job, _ = plate.sequence_job(stage_id, plan.style, plan.scale, work / "plate", camera_json, samples=samples, **kw)
     key = plate.sequence_key(job, source)
     folder = SEQUENCE_CACHE / key if args.model_cache else work / "plate"
@@ -464,6 +474,9 @@ def parse(argv: Sequence[str]):
                    help=f"EEVEE samples (default: 64, 32 cel; {MOVING_SAMPLES} per frame with the moving camera)")
     g.add_argument("--model-jobs", type=positive, default=2, metavar="N",
                    help="Blender processes rendering the moving camera's frames together (default 2)")
+    g.add_argument("--model-shadows", action=argparse.BooleanOptionalAction, default=None,
+                   help="EEVEE's shadows through the moving camera (default: off for the logo, whose CRT picture "
+                        "they barely change, at twice the speed; on for other models). The cel finish has none")
     g.add_argument("--model-cache", type=int, default=SEQUENCES_KEPT, metavar="N",
                    help=f"keep the moving camera's frames of the last N clips, so the same clip with other options "
                         f"skips Blender (default {SEQUENCES_KEPT}, about 1.8 GB each for a 3-minute game; 0: none)")
