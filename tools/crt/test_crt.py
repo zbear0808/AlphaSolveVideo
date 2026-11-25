@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import os
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
@@ -448,10 +449,11 @@ AFTERGLOW = [222.391, 35.744, 28.819, 22.613, 18.266, 14.782, 12.129, 9.525, 6.9
 
 
 def run_stream(exe: str, preset: Path, size: Tuple[int, int], out_size: Tuple[int, int], frames: List[bytes],
-               params: str = "") -> Tuple[List[bytes], List[str]]:
+               params: str = "", env: Optional[dict] = None) -> Tuple[List[bytes], List[str]]:
     """Frames through crt-stream: (the frames it wrote, its stderr lines)."""
     cmd = [exe, "--preset", str(preset), "--input", f"{size[0]}x{size[1]}", "--output", f"{out_size[0]}x{out_size[1]}"]
-    p = subprocess.run(cmd + (["--params", params] if params else []), input=b"".join(frames), capture_output=True)
+    p = subprocess.run(cmd + (["--params", params] if params else []), input=b"".join(frames), capture_output=True,
+                       env=env)
     lines = p.stderr.decode("utf-8", "replace").splitlines()
     if p.returncode != 0:
         raise AssertionError(f"crt-stream failed (exit {p.returncode}): {' | '.join(lines[-4:])}")
@@ -511,11 +513,13 @@ class Stream(unittest.TestCase):
                     for v in ((x * 7) % 256, (y * 5) % 256, ((x + y) * 3) % 256))
         rgba = b"".join(rgb[i:i + 3] + b"\xff" for i in range(0, len(rgb), 3))
         bgr = b"".join(rgb[i:i + 3][::-1] for i in range(0, len(rgb), 3))
+        # crt-stream's wgpu takes the fast GPU, librashader-cli's the first one Vulkan lists: the same one here
+        env = dict(os.environ, WGPU_POWER_PREF=os.environ.get("WGPU_POWER_PREF", "none"))
         for name, preset, settings in (("royale", rv.PRESET, rv.physical_settings(width, height, 6)),
                                        ("guest", GUEST, dataclasses.replace(rv.physical_settings(width, height, 6), params="shadowMask=6"))):
             with self.subTest(name), tempfile.TemporaryDirectory() as tmp:
                 frames, _ = run_stream(self.exe, preset, (width, height), (settings.width, settings.height), [rgba],
-                                       settings.params)
+                                       settings.params, env)
                 src, dst = Path(tmp) / "in.bmp", Path(tmp) / "out.bmp"
                 src.write_bytes(rv.bmp_bytes(bgr, width, height))
                 rv.draw(cli, runtime, preset, settings, src, dst)
