@@ -165,6 +165,44 @@ class Shaders(unittest.TestCase):
         self.assertIn("crt/shaders/crt-royale/src/crt-royale-bloom-approx.h", files)   # only #included
         self.assertIn("include/gamma-management.h", files)                             # outside crt/
         self.assertIn("crt/shaders/crt-royale/TileableLinearShadowMaskEDP.png", files)  # a texture
+        self.assertEqual(len(files), 38)
+
+    def test_every_preset_is_vendored(self):
+        needed = vendor_shaders.needed(vendor_shaders.VENDORED)
+        for preset in tuple(vendor_shaders.PRESETS.values()) + vendor_shaders.MORE_PRESETS:
+            self.assertIn(preset, needed)
+        self.assertIn("crt/shaders/guest/hd/gaussian_horizontal.slang", needed)   # guest-ntsc's
+        self.assertIn("hdr/shaders/include/sony_megatron_v2.h", needed)           # Megatron's, through #reference
+
+    def _closure(self, files: dict, preset: str = "p.slangp") -> set:
+        with tempfile.TemporaryDirectory() as tmp:
+            for name, text in files.items():
+                (Path(tmp) / name).parent.mkdir(parents=True, exist_ok=True)
+                (Path(tmp) / name).write_text(text, encoding="utf-8")
+            return vendor_shaders.closure(Path(tmp), preset)
+
+    def test_closure_reads_quoted_and_unquoted_paths(self):
+        files = self._closure({"p.slangp": 'shaders = 2\nshader0 = s/a.slang\nscale0 = 1.0\nalias0 = A\n'
+                                           'shader1 = "s/b.slang"\nfilter_linear1 = "false"\n'})
+        self.assertEqual(files, {"p.slangp", "s/a.slang", "s/b.slang"})
+
+    def test_closure_reads_textures(self):
+        files = self._closure({"p.slangp": 'shaders = 1\nshader0 = a.slang\nLUT2 = "l/two.png"\n'
+                                           'textures = "LUT1;LUT2"\nLUT1 = l/one.png\nLUT1_linear = true\n'
+                                           'other = "x.png"\n'})
+        self.assertEqual(files, {"p.slangp", "a.slang", "l/one.png", "l/two.png"})
+
+    def test_closure_follows_references_and_includes(self):
+        files = self._closure({
+            "p.slangp": '/* shader9 = "not/this.slang" */\n#reference "base/b.slangp"\nparam_a = "0.5"\n',
+            "base/b.slangp": '#reference "../c.slangp"\nshaders = 1\nshader0 = "s.slang"\n',
+            "c.slangp": "# a comment\nshaders = 1\nshader0 = base/s.slang\n",
+            "base/s.slang": '#version 450\n#include "inc/i.h"\n',
+            "base/inc/i.h": '  #  include "../../j.inc"\n'})
+        self.assertEqual(files, {"p.slangp", "base/b.slangp", "c.slangp", "base/s.slang", "base/inc/i.h", "j.inc"})
+
+    def test_closure_lists_missing_files(self):
+        self.assertEqual(self._closure({"p.slangp": "shader0 = gone.slang\n"}), {"p.slangp", "gone.slang"})
 
     def test_blob_id_is_gits(self):
         self.assertEqual(vendor_shaders.blob_id(b""), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")
