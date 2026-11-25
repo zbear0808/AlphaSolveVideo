@@ -115,7 +115,7 @@ def royale_params(ctx: Context) -> Params:
             "interlace_detect_toggle": 0, "geom_aspect_ratio_x": ctx.aspect_x, "geom_aspect_ratio_y": ctx.aspect_y}
 
 
-# ---------------------------------------------------------------- crt-guest-advanced (pipelines/guest_advanced/video.py)
+# ---------------------------------------------------------------- crt-guest-advanced (guest_advanced/video.py)
 # The mask state every look starts from, so that no look keeps another's slot or shift settings
 GUEST_MASK_BASE = dict(shadowMask=6, masksize=1, mask_zoom=0, mzoom_sh=0, mshift=0, mask_layout=0, maskstr=0.3,
                        mcut=1.1, maskboost=1.0, slotmask=0, slotmask1=0, slotwidth=0, double_slot=2, slotms=1)

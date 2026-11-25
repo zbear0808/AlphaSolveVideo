@@ -24,7 +24,7 @@ same settings, and:
     loses its afterglow (it says so).
 
   Standard mode (retro console emulation):
-    video -> ffmpeg (fit to N x N "console signal", default 288) -> crt-royale -> ffmpeg (4:4:4) -> movie
+    video -> ffmpeg (fit to N x N "console signal", default 288) -> the shader -> ffmpeg (4:4:4) -> movie
 
   Physical pixel mode (--physical-pixels / --scale N):
     video -> 1:1 native frames (each video pixel is a CRT beam/scanline element) ->
@@ -82,7 +82,7 @@ RUNTIME_ORDER = {
     "win32": ("d3d11", "d3d12", "wgpu", "vulkan", "opengl4"),
     "linux": ("wgpu", "vulkan", "opengl4"),
 }
-# CRT Royale drawn by Blender's GPU module (blender_crt.py, blender-chain/): one process for the whole video, which
+# A CRT drawn by Blender's GPU module (blender_crt.py, blender-chain/): one process for the whole video, which
 # compiles the preset once, where librashader-cli starts and compiles it again for every frame. 3504x2880 frames
 # go 3 to 9 times as fast into the same encoder (research/crt-in-blender), 0.003/255 from librashader-cli's on a
 # Mac. Tried before librashader's runtimes where Blender is found: on macOS and Linux, which hand it the frames
