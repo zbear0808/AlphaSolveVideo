@@ -481,5 +481,126 @@ class BlenderRender(unittest.TestCase):
         self.assertLessEqual(mean, 1.0, f"Blender's frame is {mean:.3f}/255 from librashader-cli's ({runtime})")
 
 
+GUEST_GRILLE = ("interm=0,bloom=0.5,bmask1=1,shadowMask=6,masksize=1,mask_zoom=0,mzoom_sh=0,mshift=0,mask_layout=0,"
+                "maskstr=0.5,mcut=1.1,maskboost=1,slotmask=0,slotmask1=0,slotwidth=0,double_slot=2,slotms=1")
+MEGATRON_GRILLE3 = ("hcrt_colour_space=2,hcrt_brightness=0.2,hcrt_crt_screen_type=0,hcrt_lcd_resolution=1,"
+                    "hcrt_crt_resolution=2,hcrt_lcd_subpixel=2")
+
+
+class BlenderShaders(unittest.TestCase):
+    """guest, guest-ntsc and Megatron drawn by blender_crt.py on this machine, frame by frame through its pipes:
+    needs Blender and a GPU (and librashader-cli for the comparisons)."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not rv.blender_platform():
+            raise unittest.SkipTest("the Blender runtime runs on macOS and Linux")
+        cls.blender = rv.find_blender()
+        if not cls.blender:
+            raise unittest.SkipTest("no Blender")
+        cls.ffmpeg = locate.find_ffmpeg()
+        cls.tmp = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.tmp.cleanup)
+
+    def draw(self, shader: str, frames: list, size, out, params: str = "", warmup: int = 0) -> list:
+        """The frames (raw RGBA of `size`) as blender_crt.py draws them at `out`, raw RGBA."""
+        import os
+        import threading
+        chain = rv.HERE / "blender-chain" / shader
+        luts = rv.lut_folder(Path(self.tmp.name) / shader, self.ffmpeg, chain=chain)
+        settings = rv.Settings(out[0], out[1], params, 3.0, "")
+        r_in, w_in = os.pipe()
+        r_out, w_out = os.pipe()
+        cmd = rv.blender_command(self.blender, luts, r_in, w_out, size, settings, warmup=warmup)
+        cmd[cmd.index("--") + 1] = str(chain)
+        proc = subprocess.Popen(cmd, pass_fds=(r_in, w_out), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE)
+        os.close(r_in)
+        os.close(w_out)
+
+        def feed():
+            with os.fdopen(w_in, "wb") as f:
+                for frame in frames:
+                    f.write(frame)
+
+        threading.Thread(target=feed, daemon=True).start()
+        drawn, n = [], out[0] * out[1] * 4
+        with os.fdopen(r_out, "rb") as f:
+            while len(chunk := f.read(n)) == n:
+                drawn.append(chunk)
+        log = proc.stderr.read().decode("utf-8", "replace")
+        proc.stderr.close()
+        proc.wait()
+        self.assertEqual((proc.returncode, len(drawn)), (0, len(frames)), log[-2000:])
+        return drawn
+
+    def picture(self, size, name="card") -> tuple:
+        """A test card of `size`: its PNG and its raw RGBA."""
+        png = Path(self.tmp.name) / f"{name}{size[0]}x{size[1]}.png"
+        subprocess.run([self.ffmpeg, "-v", "error", "-y", "-f", "lavfi", "-i", f"testsrc2=s={size[0]}x{size[1]}",
+                        "-frames:v", "1", str(png)], check=True)
+        raw = subprocess.run([self.ffmpeg, "-v", "error", "-i", str(png), "-f", "rawvideo", "-pix_fmt", "rgba", "-"],
+                             capture_output=True, check=True).stdout
+        return png, raw
+
+    def test_frame_0_matches_librashader(self):
+        try:
+            cli = rv.find_librashader()
+        except locate.NotFound:
+            raise unittest.SkipTest("no librashader-cli: python3 tools/crt/install_librashader.py")
+        runtime = rv.runtime_candidates(rv.runtimes_of(cli))[0]
+        size, out = (160, 120), (960, 720)
+        for shader, params in (("guest", GUEST_GRILLE), ("guest-ntsc", GUEST_GRILLE), ("megatron", MEGATRON_GRILLE3)):
+            with self.subTest(shader):
+                png, raw = self.picture(size, shader)   # draw() deletes it
+                drawn = self.draw(shader, [raw], size, out, params)[0]
+                doc = json.loads((rv.HERE / "blender-chain" / shader / "chain.json").read_text(encoding="utf-8"))
+                dst = Path(self.tmp.name) / f"{shader}.png"
+                rv.draw(cli, runtime, rv.HERE / doc["preset"], rv.Settings(out[0], out[1], params, 3.0, ""),
+                        png, dst)
+                b = subprocess.run([self.ffmpeg, "-v", "error", "-i", str(dst), "-f", "rawvideo", "-pix_fmt", "rgba",
+                                    "-"], capture_output=True, check=True).stdout
+                self.assertEqual(len(drawn), len(b))
+                mean = (sum(abs(x - y) for x, y in zip(drawn, b)) - sum(abs(x - y) for x, y in
+                                                                        zip(drawn[3::4], b[3::4]))) / (len(b) * 3 / 4)
+                self.assertLessEqual(mean, 1.0, f"{shader}: {mean:.3f}/255 from librashader-cli's ({runtime})")
+
+    def test_the_afterglow_decays_as_measured(self):
+        # The crt-royale project's lrs-seq measurement (pipelines/guest_advanced/temporal_results.json): flat
+        # 288x288 frames drawn at 1280x1280 with guest's own defaults, 10 white then black; the mean of the picture
+        # inside a 48 px margin
+        measured = [222.4, 35.7, 28.8, 22.6, 18.3, 14.8, 12.1, 9.5, 6.9, 6.1, 4.3, 3.5, 2.6, 1.7, 1.0, 1.0, 0.0, 0.0]
+        side, out, margin = 288, 1280, 48
+        frames = [bytes([255, 255, 255, 255]) * side * side] * 10 + [bytes([0, 0, 0, 255]) * side * side] * 17
+        means = []
+        for drawn in self.draw("guest", frames, (side, side), (out, out))[9:]:
+            total = 0
+            for y in range(margin, out - margin):
+                row = drawn[(y * out + margin) * 4:(y * out + out - margin) * 4]
+                total += sum(row) - sum(row[3::4])
+            means.append(total / ((out - 2 * margin) ** 2 * 3))
+        for i, (got, want) in enumerate(zip(means, measured)):
+            self.assertAlmostEqual(got, want, delta=1.0, msg=f"black frame {i}: {[round(m, 1) for m in means]}")
+
+    def test_the_ntsc_phase_alternates(self):
+        size, out = (320, 240), (960, 720)   # over 300 px wide: 2 phases, alternating
+        _, raw = self.picture(size)
+        drawn = self.draw("guest-ntsc", [raw] * 3, size, out)
+
+        def apart(a, b):
+            return sum(abs(x - y) for x, y in zip(a, b)) / len(a)
+
+        self.assertGreater(apart(drawn[0], drawn[1]), 1.0)
+        self.assertLess(apart(drawn[0], drawn[2]), 0.1)
+
+    def test_warmup_is_the_first_frame_drawn_before(self):
+        side = 64
+        white, black = bytes([255] * 4) * side * side, bytes([0, 0, 0, 255]) * side * side
+        plain = self.draw("guest", [white, white, white, black], (side, side), (256, 256))
+        warmed = self.draw("guest", [white, black], (side, side), (256, 256), warmup=2)
+        self.assertEqual(warmed, plain[2:])
+        self.assertNotEqual(plain[3], self.draw("guest", [black], (side, side), (256, 256))[0])   # the afterglow
+
+
 if __name__ == "__main__":
     unittest.main()
