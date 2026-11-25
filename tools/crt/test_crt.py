@@ -151,6 +151,8 @@ class Candidates(unittest.TestCase):
         self.assertIn("opengl", cmd)   # faster than Blender's Vulkan backend on Linux
         self.assertNotIn("--gpu-backend", rv.blender_command("blender", Path("luts"), 5, 7, (584, 480), settings,
                                                              platform="darwin"))
+        self.assertEqual(rv.blender_command("blender", Path("luts"), 5, 7, (584, 480), settings, warmup=30)[-2:],
+                         ["--warmup", "30"])
 
 
 class Shaders(unittest.TestCase):

@@ -480,18 +480,19 @@ def lut_folder(folder: Path, ffmpeg: str, chain: Path = BLENDER_CHAIN) -> Path:
 
 
 def blender_command(blender: str, luts: Path, in_fd: int, out_fd: int, input_size: Tuple[int, int],
-                    settings: Settings, platform: str = sys.platform) -> List[str]:
+                    settings: Settings, platform: str = sys.platform, warmup: int = 0) -> List[str]:
     # On Linux Blender's OpenGL backend drew a 3504x2880 frame in 26 ms on a GTX 1060, its Vulkan backend in 43
     backend = ["--gpu-backend", "opengl"] if platform.startswith("linux") else []
     return [blender, "-b", "--factory-startup", "-noaudio", *backend, "--python-exit-code", "1",
             "--python", str(BLENDER_SCRIPT), "--", str(BLENDER_CHAIN), str(luts), str(in_fd), str(out_fd),
-            str(input_size[0]), str(input_size[1]), str(settings.width), str(settings.height), settings.params]
+            str(input_size[0]), str(input_size[1]), str(settings.width), str(settings.height), settings.params,
+            *(["--warmup", str(warmup)] if warmup else [])]
 
 
 def render_blender(src: Path, out: Path, settings: Settings, *, ffmpeg: str, blender: str,
                    input_size: Tuple[int, int], rate: str, folder: Path, src_in: List[str], limit: List[str],
                    prefilter: str, alpha: bool, codec: str, audio: bool, total: Optional[int],
-                   on_progress: Optional[Callable[[int, Optional[int]], None]]) -> int:
+                   on_progress: Optional[Callable[[int, Optional[int]], None]], warmup: int = 0) -> int:
     """The video through blender_crt.py: ffmpeg decodes into one pipe, Blender draws from it into another, ffmpeg
     encodes from that. Python only starts them; the frames don't pass through it. Raises BlenderUnavailable if
     Blender stops before its first frame."""
@@ -512,7 +513,7 @@ def render_blender(src: Path, out: Path, settings: Settings, *, ffmpeg: str, ble
                                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=logs["encode"])
         procs.append(encoder)
         in_fd, out_fd = decoder.stdout.fileno(), encoder.stdin.fileno()
-        drawer = subprocess.Popen(blender_command(blender, luts, in_fd, out_fd, input_size, settings),
+        drawer = subprocess.Popen(blender_command(blender, luts, in_fd, out_fd, input_size, settings, warmup=warmup),
                                   pass_fds=(in_fd, out_fd), stdin=subprocess.DEVNULL, stdout=logs["blender"],
                                   stderr=subprocess.PIPE)
         procs.append(drawer)
