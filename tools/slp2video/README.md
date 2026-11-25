@@ -12,7 +12,7 @@ python3 tools/slp2video/slp2video.py ys.slp --shy-guy-sprite mascot.png --format
 python3 tools/slp2video/slp2video.py --help                                       # every option
 ```
 
-Needs what `slp2alpha render` needs (the headless Dolphin build, a Melee ISO, ffmpeg); Blender for `--model`; for `--crt`, Blender (macOS and Linux) or `librashader-cli` 0.12.1 (`python3 tools/crt/install_librashader.py` builds it). The CRT renderer and its shaders are in [`tools/crt`](../crt/README.md): crt-guest-advanced by default, or `--crt-shader guest-ntsc`, `megatron` or `royale`, each with its own looks (`--crt-mask`).
+Needs what `slp2alpha render` needs (the headless Dolphin build, a Melee ISO, ffmpeg); Blender for `--model`; for `--crt`, Blender (macOS and Linux), or `crt-stream` and `librashader-cli` 0.12.1 (`python3 tools/crt/install_librashader.py` builds both; Windows uses them). The [Install](../../README.md#install) section has the steps for each platform. The CRT renderer and its shaders are in [`tools/crt`](../crt/README.md): crt-guest-advanced by default, or `--crt-shader guest-ntsc`, `megatron` or `royale`, each with its own looks (`--crt-mask`).
 
 | File | |
 |---|---|

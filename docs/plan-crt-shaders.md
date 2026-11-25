@@ -1,6 +1,6 @@
 # More CRT shaders: crt-guest-advanced and Sony Megatron
 
-Status: plan, 23 November 2026; being built from 25 November. Section 9 lists the decisions.
+Status: built, 25 November 2026: steps C1–C8 are done on the Mac and the Linux PC; C9 (HDR10) waits, and Windows hasn't been run (`.github/workflows/crt.yml` builds and tests it when run by hand). Section 9 lists the decisions.
 
 Decided, 25 November:
 

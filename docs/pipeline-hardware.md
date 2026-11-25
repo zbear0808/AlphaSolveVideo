@@ -19,7 +19,7 @@ What each step runs on:
 | 5 | The logo through the game's camera, one PNG per frame | Blender 5.2, EEVEE, 2 processes, 16 samples, no shadows | GPU (drawing), CPU (scene, PNG writing) | 18 s |
 | 6 | Composite: the fighters over the logo | ffmpeg (`overlay`), lossless FFV1 | CPU | 1 s |
 | 7a | Squeeze each frame to Melee's shape (584×480) | ffmpeg (Lanczos) | CPU | in 7b |
-| 7b | CRT Royale at 3504×2880 | Blender's GPU module (`tools/crt/blender_crt.py`), Metal | GPU | 13–17 s, steps 7a–7d together |
+| 7b | The CRT at 3504×2880 (measured with CRT Royale; guest, the default since 25 November, takes about as long) | Blender's GPU module (`tools/crt/blender_crt.py`), Metal | GPU | 13–17 s, steps 7a–7d together |
 | 7c | The alpha, scaled up to the CRT's size and merged | ffmpeg | CPU | in 7b |
 | 7d | Encode: ProRes 4444 `.mov` | Apple's ProRes encoder | CPU (software on a plain M1) | in 7b; this sets 7's pace |
 | | **All of it** | | | **41 s** (before this work: 120 s) |
@@ -38,7 +38,7 @@ What each step runs on:
 | 5 | The logo through the game's camera | Blender 5.2, EEVEE (OpenGL backend, its own choice), 2 processes, 16 samples, no shadows | GPU (GTX 1060), CPU (scene, PNG writing) | 17 s |
 | 6 | Composite | ffmpeg, lossless FFV1 | CPU | 2 s |
 | 7a | Squeeze to 584×480 | ffmpeg | CPU | in 7b |
-| 7b | CRT Royale at 3504×2880 | Blender's GPU module, OpenGL | GPU (GTX 1060) | 27–28 s for `.mov`, 16–17 s for `.mp4`, steps 7a–7d together |
+| 7b | The CRT at 3504×2880 (measured with CRT Royale) | Blender's GPU module, OpenGL | GPU (GTX 1060) | 27–28 s for `.mov`, 16–17 s for `.mp4`, steps 7a–7d together |
 | 7c | The alpha, scaled up and merged (`.mov`), or written as `NAME matte.mp4` | ffmpeg; for the matte NVENC | CPU; GPU encoder | in 7b |
 | 7d | Encode: ProRes 4444 `.mov`, or H.264 4:4:4 `.mp4` | `prores_aw`, or NVENC (`h264_nvenc`) | CPU, or GPU encoder | in 7b; `prores_aw` sets 7's pace (6–8 frames/s), NVENC doesn't (12–13) |
 | | **All of it** | | | **60 s** `.mov`, **49 s** `.mp4` (before this work: 165 s) |
@@ -58,7 +58,7 @@ Not run end to end yet. The headless Dolphin build compiles on GitHub Actions, b
 | 4 | Export the game's camera | Inside Dolphin | CPU | none extra |
 | 5 | The logo through the game's camera | Blender 5.2, EEVEE (found in Program Files or Steam; not run on Windows yet) | GPU, CPU | not measured |
 | 6 | Composite | ffmpeg | CPU | not measured |
-| 7a–c | Squeeze, CRT Royale, alpha | ffmpeg; **`librashader-cli`, Direct3D 11, one process per frame**. Blender's GPU module isn't used there yet: it gets its frames through inherited pipes, which Python's `subprocess` passes on macOS and Linux only | CPU; GPU | not measured. On the Linux PC the same per-frame `librashader-cli` managed about 2 frames/s |
+| 7a–c | Squeeze, the CRT, alpha | ffmpeg; **`crt-stream`**: one librashader chain for the whole video, on wgpu (Direct3D 12 or Vulkan), so guest keeps its afterglow; else `librashader-cli`, Direct3D 11, one process per frame. Blender's GPU module isn't used there yet: it gets its frames through inherited pipes, which Python's `subprocess` passes on macOS and Linux only | CPU; GPU | not measured. On the Linux PC the same per-frame `librashader-cli` managed about 2 frames/s |
 | 7d | Encode | `prores_aw` for `.mov`; NVENC for `.mp4` with an NVIDIA GPU whose driver the FFmpeg build supports (9.0 needs driver 610 or newer), else `libx264` | CPU, or GPU encoder | not measured |
 
 ## Which part of the computer limits each run now

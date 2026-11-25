@@ -46,9 +46,22 @@ Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto
   - `librashader-cli` instead starts again for every frame, and compiles the preset each time: about 0.5 s a frame on an M1, 1 s of CPU on the Linux PC.
 - **Every shader, the same way.** On a 56-frame clip at 1280x1280, guest, guest-ntsc, Megatron and Royale each took 3–4 s through Blender into ProRes. Their first frames, decoded, were 68–85 dB PSNR from `librashader-cli`'s Metal [verified, 25 November].
 - **The shaders are librashader's.** [`blender-chain/`](blender-chain/README.md) is the vendored preset as `librashader-cli` 0.12.1 compiles it: each pass as GLSL, with its filter, wrap mode, framebuffer format and scaling. `blender_crt.py` sizes and binds the passes as librashader's runtime does.
-  - Against `librashader-cli`'s Metal on the same Mac, its frames are 0.003/255 apart on average, for every mask: 0.36% of pixels differ at all. librashader's own runtimes are 0.4–1.0/255 from each other.
+  - **Royale:** against `librashader-cli`'s Metal on the same Mac, its frames are 0.003/255 apart on average, for every mask: 0.36% of pixels differ at all.
+  - **The other shaders,** on frame 0 at 3504x2880, every look tried [verified, 25 November]:
+    - on the Mac, guest, guest-ntsc and Megatron are 0.0003/255 or less from `librashader-cli`'s Metal;
+    - on the PC's GTX 1060, Blender on OpenGL against `librashader-cli`'s wgpu: Royale 0.0002/255, Megatron 0.002–0.011, guest 0.036–0.050 and guest-ntsc 0.058–0.082.
+
+    guest's larger difference is one pass, `bloom_horizontal`. Some of its rows land exactly on the edge of a source row, where the two drivers round differently.
+  - For scale, librashader's own runtimes are 0.4–1.0/255 from each other.
+  - **Four rewrites** make the passes compile in Blender. They're applied as Blender loads the passes, so `blender-chain/` stays `librashader-cli`'s output byte for byte. `blender_crt.py`'s docstring lists them:
+    - a whole-array copy becomes a loop (Royale, guest-ntsc);
+    - a local array set by a constructor becomes one assignment per element (guest-ntsc);
+    - arrays of arrays become flat arrays (Megatron);
+    - constant tables become `switch` functions (Megatron). Without that, Metal built the tables again for every pixel: 280 ms a frame instead of 23–32 ms.
+  - **State across frames, as librashader keeps it.** Frame *n* is drawn with frame count *n*. A pass that's read back as `<alias>Feedback` keeps its last frame, black at the start.
+  - **No mip levels.** In guest they only reach the picture through its raster bloom (`BLOOM`), which is off in every look.
   - `vendor_chain.py write` writes `blender-chain/`, and `vendor_chain.py check` checks it.
-- **Speed,** 3504x2880 from 584x480 ([`docs/report-gpu-crt.md`](../../docs/report-gpu-crt.md)). With nothing to encode, Blender draws 37 frames a second on an M1 and 23 on the Linux PC's GTX 1060. With an encoder, the encoder sets the pace:
+- **Speed,** 3504x2880 from 584x480 ([`docs/report-gpu-crt.md`](../../docs/report-gpu-crt.md)). With nothing to encode, a frame takes Blender 21–32 ms on an M1, for every shader. On the Linux PC's GTX 1060 it takes 18.5 ms for Royale, 20.6 for guest, 19.4 for guest-ntsc and 14.4 for Megatron. With an encoder, the encoder sets the pace (measured with Royale):
   - **M1 into Apple's ProRes:** 4–19 frames a second, against 0.9–5 with `librashader-cli`;
   - **PC into `prores_aw`:** 6–8, against 2;
   - **PC into NVENC:** 12–13, against 2.
@@ -98,13 +111,13 @@ crt-stream --preset P.slangp --input 584x480 --output 3504x2880 [--params k=v,..
 
 - **wgpu is in every build** because librashader-cli 0.12.1 doesn't compile without it: its `transpile` command imports wgpu's shader translator (naga) whatever the features. With `--features vulkan` alone, cargo stops at `use librashader::reflect::naga` [tried in Ubuntu 22.04].
 - **Linux draws through wgpu, on Vulkan.** librashader-cli's own Vulkan runtime ignores the size it's asked for (`-d`): it draws and reads back at the input's size (`src/render/vk/mod.rs`). Asked for 3840x2880 from a 640x480 frame, it wrote 640x480. Its wgpu runtime draws at the right size, through Vulkan. `render_video.py` checks every frame's size, so a runtime that gets it wrong is skipped (`auto`) or stops the render.
-- **On macOS, wgpu can't draw this preset** (`Unsupported features were requested: PIPELINE_CACHE`), so `auto` uses Metal.
+- **On macOS, `librashader-cli`'s wgpu can't draw Royale** (`Unsupported features were requested: PIPELINE_CACHE`), so `auto` uses Metal. `crt-stream`'s wgpu does draw on the Mac.
 - **Which GPU, on Linux.** wgpu takes the first GPU Vulkan lists: on a laptop with Intel graphics and an NVIDIA card, the Intel one. To draw on the other, leave Vulkan only its driver, e.g. `VK_DRIVER_FILES=/usr/share/vulkan/icd.d/nvidia_icd.json` (Dolphin follows it too). On the Linux PC the GTX 1060 drew a 3504x2880 frame in 12 ms, the Intel HD 630 in about 60 ms and lavapipe in 760 ms.
 - **What a frame costs on Linux.** Each `librashader-cli` run takes about 1 s of CPU on the PC before it draws anything, even for a 64x48 frame: starting up, and compiling the preset's 12 passes. librashader keeps compiled shaders on disk for Metal (`~/Library/Caches/librashader`), but on the PC its cache folder stayed empty. So a frame takes about 1.7 s there on any of its GPUs, against 0.5 s on the Mac, with 4 at a time. The encoder is the other limit. On CRT frames of a full stage, the PC's `prores_ks` manages about 0.4 frames a second (`prores_aw` 2.7, `libx264` 1.9); mostly transparent frames go much faster.
 - **Left out:** Direct3D 12, which downloads a prebuilt DXC while building; OpenGL, which needs X11's development packages to build on Linux, and a window to run; Direct3D 9.
 - **Found:** `--librashader PATH` or `LIBRASHADER_CLI`, then `packages/librashader/bin`, the PATH and `~/.cargo/bin`.
 - **Each frame is drawn in a fresh chain,** so nothing carries over from one frame to the next:
-  - **guest** loses its afterglow. `render_video.py` says so once and goes on. Without Blender, that's the price; it only shows below 8/255.
+  - **guest** loses its afterglow. `render_video.py` says so once and goes on. Blender and `crt-stream` keep it. Either way it only shows below 8/255.
   - **guest-ntsc** needs the frame's parity for its chroma phase. `librashader-cli render -f N` draws the same frame N + 1 times, the last with frame count N, so odd frames are drawn with `-f 1`. That alternates the phase as one chain does: on a still picture 584 wide, frames 0 and 2 come out identical, 0 and 1 apart (24.7 dB PSNR), and a 3504x2880 frame took 0.35 s instead of 0.32 on an M1 [verified, 25 November]. Below 301 source pixels the NTSC passes use 3 phases and merge both fields, so the frames don't alternate at all.
   - **Megatron and Royale** keep nothing, so they come out as they would in one chain.
 
@@ -121,6 +134,7 @@ crt-stream --preset P.slangp --input 584x480 --output 3504x2880 [--params k=v,..
 | Windows | Not yet. `.github/workflows/crt.yml` builds and tests on Windows, Linux and macOS runners when run by hand |
 | The Mac, `--runtime blender` against `librashader-cli`'s Metal | Frames 0.003/255 apart on average, for each mask (3 frames of a real clip). Alpha, which ffmpeg merges in either way, identical. `slp2video --crt` on a 60-frame clip: the same video after ProRes, frame for frame |
 | The Linux PC, `--runtime blender` | `test_crt.py` passes, Blender's render against `librashader-cli`'s included. On real 3504x2880 CRT frames, OpenGL on the GTX 1060 is 0.0002/255 from `librashader-cli`'s wgpu on the same GPU, every mask ([`docs/report-gpu-crt.md`](../../docs/report-gpu-crt.md)) |
+| The Mac and the Linux PC, guest, guest-ntsc and Megatron in Blender | Frame 0 within 0.0003/255 of `librashader-cli`'s Metal on the Mac, and 0.002–0.082/255 of its wgpu on the PC. guest's afterglow decays as the TouchDesigner project measured it, to within 0.0005 levels on the Mac and 0.06 on the PC. guest-ntsc's phase alternates. Royale's frames are unchanged, byte for byte, on both machines. `test_crt.py` passes on both |
 | The Mac and the Linux PC, `--runtime stream` | Frame 0 identical to `librashader-cli`'s (Metal on the Mac, wgpu on the GTX 1060), every shader. guest's afterglow as the TouchDesigner project measured it. `test_crt.py` passes on both, and on Ubuntu 22.04 arm64 in Docker (wgpu on lavapipe) |
 
 ## Linux in Docker
