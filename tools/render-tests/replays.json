@@ -4,7 +4,8 @@
   "replays": [
     {"file": "DishonestMuddyCoyote.slp", "label": "BF: Fox vs Falco (lasers, shine)",
      "renders": [[], ["--characters-only"], ["--static-camera"], ["--export-camera"],
-                 ["--characters-only", "--raw-resolution", "--start-frame", "1500", "--end-frame", "1800"]]},
+                 ["--characters-only", "--raw-resolution", "--start-frame", "1500", "--end-frame", "1800"],
+                 ["--nametag", "P1=ZUBAIR77", "--nametag", "P4=", "--start-frame", "1500", "--end-frame", "1800"]]},
     {"file": "BlindComposedToad.slp", "label": "BF doubles: Fox, Sheik, Fox, Peach",
      "renders": [[], ["--characters-only"]]},
     {"file": "SurprisedRepentantBuffalo.slp", "label": "BF: Ness vs Yoshi (console replay)",

@@ -133,7 +133,7 @@ and with flicker + solve.
 | HUD: percents, stocks, timer | hidden | Hide HUD and Overlays | all stages |
 | Ready/GO, GAME!, P1/CP/P2 indicators | hidden | same | BF start (`frames/bf_hide/` shows them with the stage-only code); Stadium GAME! appears in normal playback, not with the code (`sync/ps_sync2/B1/worst_11980…png`) |
 | Magnifying-glass bubble (off-screen fighter) | hidden | same | BF (`frames/bf_hide/`, frames 7–8) |
-| Name tags | hidden | same (they're off in slp2alpha anyway) | by code reading |
+| Name tags | hidden | same | BF (`DishonestMuddyCoyote.slp`, [nametags.md](nametags.md)) |
 | Screen flash on strong hits | hidden | Hide Screen Flash | Stadium final hit: background alpha 29 → 6 over ~10 frames without the code, 0 with it (`frames/ps_end_hidden/n11870.png` vs `frames/ps_end_noflash/n11870.png`, `frames/ps_flash/alpha_0028.png` vs `frames/ps_noflash/alpha_0028.png`) |
 | Shy Guys | hidden | Hide Shy Guys | **not observed**: the only YS replay (38 s) spawns none |
 | Fighters, sword trails, respawn platform | kept | — | all |

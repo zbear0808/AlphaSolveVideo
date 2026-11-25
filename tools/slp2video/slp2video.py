@@ -194,6 +194,10 @@ def slp2alpha_args(args, plan: Plan, replay: Path, out_dir: Path, passthrough: S
         a += ["--shy-guy-sprite", str(Path(plan.sprite).expanduser().resolve())]
     if args.hud is not None:
         a.append("--hud" if args.hud else "--no-hud")
+    for tag in args.nametag:
+        a += ["--nametag", tag]
+    if args.no_nametags:
+        a.append("--no-nametags")
     for opt, value in (("--start-frame", args.start_frame), ("--end-frame", args.end_frame),
                        ("--dolphin", args.dolphin), ("--iso", args.iso), ("--ffmpeg", args.ffmpeg)):
         if value is not None:
@@ -402,6 +406,10 @@ def parse(argv: Sequence[str]):
                         "best); with the stage drawn too if --keep-background")
     g.add_argument("--hud", action=argparse.BooleanOptionalAction, default=None,
                    help="percents, stocks and timer (default: on with the stage, off without)")
+    g.add_argument("--nametag", action="append", default=[], metavar="P1=TEXT",
+                   help="change what a player's name tag says, or hide it with an empty TEXT (repeat for more "
+                        "players; docs/nametags.md)")
+    g.add_argument("--no-nametags", action="store_true", help="hide the name tags, keeping the rest of the HUD")
     g.add_argument("--hide-items", action="store_true", help="without the stage: also hide items and projectiles")
     g.add_argument("--hide-effects", action="store_true", help="without the stage: also hide hit sparks, dust...")
 

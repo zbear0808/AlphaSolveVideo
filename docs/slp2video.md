@@ -24,7 +24,7 @@ The result is one file next to the replay (`--out-dir DIR`, or `-o FILE`), named
 | Regular Melee or Animelee | `--animelee` | The cel-shaded skins ([tools/animelee](../tools/animelee/README.md)) |
 | A CRT | `--crt` | CRT Royale's realistic pixels, at the console's native resolution for regular Melee |
 
-Also: `--start-frame` and `--end-frame` ([clips.md](clips.md)), `--characters-only`, `--hud`/`--no-hud`, `--hide-items`, `--hide-effects`, `--scale`, and the tool locations (`--dolphin`, `--iso`, `--ffmpeg`, `--blender`, `--librashader`). Options after a lone `--` go to `slp2alpha render` unchanged. `--keep-intermediates` keeps the work folder: the render, its alpha map, the camera export, the composite. After a failure the work folder is always kept, and its path printed.
+Also: `--start-frame` and `--end-frame` ([clips.md](clips.md)), `--characters-only`, `--hud`/`--no-hud`, `--nametag P1=TEXT` and `--no-nametags` ([nametags.md](nametags.md)), `--hide-items`, `--hide-effects`, `--scale`, and the tool locations (`--dolphin`, `--iso`, `--ffmpeg`, `--blender`, `--librashader`). Options after a lone `--` go to `slp2alpha render` unchanged. `--keep-intermediates` keeps the work folder: the render, its alpha map, the camera export, the composite. After a failure the work folder is always kept, and its path printed.
 
 ## What's drawn
 
@@ -37,7 +37,7 @@ Also: `--start-frame` and `--end-frame` ([clips.md](clips.md)), `--characters-on
 
 `--keep-background` records without the flicker codes, so there's nothing to solve: Dolphin's recording is the video (`slp2alpha render --keep-background`, which writes `fullOpaque - NAME`). Its frames are the same as a transparent render's, except that a render to the end of a replay stops one frame short ([clips.md](clips.md)). It's also the only way to see Yoshi's Story with its stage and your Shy Guys together, because its background can't be removed.
 
-The HUD (percents, stocks, timer) is drawn when the stage is, unless `--no-hud`.
+The HUD (percents, stocks, timer) is drawn when the stage is, unless `--no-hud`. Players' name tags are drawn with it.
 
 ## The model
 

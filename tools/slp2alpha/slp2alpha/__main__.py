@@ -12,7 +12,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from . import camera, config, gecko, locate, runner, shyguy, slp, solve, stages, validate
 
@@ -27,8 +27,10 @@ def cmd_info(args) -> int:
             status = 2
             continue
         ok = "supported" if stages.is_supported(r.stage_id) else "NOT supported (no background codes)"
+        tags = [f"P{port + 1} {text!r}" for port, text in enumerate(r.nametags) if text is not None]
         print(f"{Path(path).name}: replay v{r.version}, {stages.stage_name(r.stage_id)} (id {r.stage_id}, {ok}), "
-              f"frames {r.first_frame}..{r.last_frame} ({r.game_frames / 60:.1f} s)")
+              f"frames {r.first_frame}..{r.last_frame} ({r.game_frames / 60:.1f} s)"
+              + (f", name tags {', '.join(tags)}" if tags else ""))
     return status
 
 
@@ -189,15 +191,39 @@ def _render_codes(args, stage_id: int, sprite: bool = False) -> List[str]:
         enabled += stages.BACKGROUND_CODES[stage_id]
     if args.static_camera:
         enabled += config.STATIC_CAMERA_CODES
-    hud = args.hud if args.hud is not None else not args.characters_only
-    if not hud:
+    if not _hud_drawn(args):
         enabled.append(config.HIDE_HUD_CODE)
     return enabled
+
+
+def _hud_drawn(args) -> bool:
+    """The HUD, and with it the name tags: drawn by default, unless the stage isn't."""
+    return args.hud if args.hud is not None else not args.characters_only
 
 
 # Dolphin fast-forwards to a clip's start frame without printing progress, so the time it takes has to be
 # allowed for in the boot timeout. It skips about 4000 game frames per second on an M1; assume far less.
 MIN_SKIP_FPS = 200.0
+
+
+def nametag_arg(text: str) -> Tuple[int, bytes]:
+    """--nametag P1=TEXT: the port (0 for P1) and the tag's bytes. An empty TEXT hides the tag."""
+    port, sep, tag = text.partition("=")
+    port = port.strip().upper()
+    port = port[1:] if port.startswith("P") else port
+    if not sep or port not in ("1", "2", "3", "4"):
+        raise argparse.ArgumentTypeError(f"{text!r}: give a port and the text, like P1=NAME (P1 to P4)")
+    try:
+        return int(port) - 1, slp.encode_nametag(tag)
+    except ValueError as e:
+        raise argparse.ArgumentTypeError(str(e)) from None
+
+
+def _nametag_edits(args, replay: slp.ReplayInfo) -> Dict[int, bytes]:
+    """The name tags to rewrite in this replay: --nametag's, or every tag it shows with --no-nametags."""
+    if args.no_nametags:
+        return {port: b"" for port, text in enumerate(replay.nametags) if text is not None}
+    return dict(args.nametag)
 
 
 def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, ffmpeg: str, ffprobe: str,
@@ -209,6 +235,17 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
         print(f"{replay_path.name}: note: the replay ends at frame {replay.last_frame}, "
               f"rendering up to there instead of {args.end_frame}", file=sys.stderr)
     stage = stages.stage_name(replay.stage_id)
+    nametags = _nametag_edits(args, replay)
+    missing_tags = [f"P{port + 1}" for port in nametags if replay.nametags[port] is None]
+    if missing_tags:
+        shown = [f"P{port + 1} {text!r}" for port, text in enumerate(replay.nametags) if text is not None]
+        print(f"{replay_path.name}: skipped, {' and '.join(missing_tags)} {'has' if len(missing_tags) == 1 else 'have'} "
+              f"no name tag to change; only a tag the replay shows can be ({', '.join(shown) or 'it shows none'})",
+              file=sys.stderr)
+        return False
+    if nametags and not _hud_drawn(args):
+        print(f"{replay_path.name}: note: name tags are drawn with the HUD, which this render hides "
+              "(--hud draws both)", file=sys.stderr)
     if args.characters_only:
         if replay.stage_id not in stages.CHARACTERS_ONLY_TESTED:
             print(f"{replay_path.name}: note: {stage} hasn't been checked in characters-only mode; "
@@ -232,6 +269,8 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
                                        (args.animelee, "animelee"),
                                        (sprite, "shy guy sprite"),
                                        (args.raw_resolution, "raw resolution"),
+                                       (nametags and args.no_nametags, "no name tags"),
+                                       (nametags and not args.no_nametags, "name tags changed"),
                                        # labelled 60 fps: kept apart from a 59.94 render of the same replay
                                        (args.export_camera, "60 fps")) if on]
     name = replay_path.stem + (f" ({', '.join(variant)})" if variant else "")
@@ -242,13 +281,23 @@ def _render_one(args, replay_path: Path, dolphin: Path, engine: str, iso: Path, 
     config.write_user_dir(user, codes, enabled=enabled, scale=args.scale, engine=engine,
                           cpu_thread=args.dual_core, debug_logging=args.debug, video_backend=args.backend,
                           custom_textures=sprite.textures if sprite else None, raw_resolution=args.raw_resolution)
+    played = replay_path
+    if nametags:
+        # Dolphin plays a copy with the tags rewritten; the replay itself is left as it is.
+        played = work / "replay" / replay_path.name
+        played.parent.mkdir()
+        slp.write_nametags(replay_path, played, nametags)
+        shown = ", ".join(f"P{port + 1} {replay.nametags[port]!r} -> "
+                          + (repr(slp.decode_nametag(text)) if text else "hidden")
+                          for port, text in sorted(nametags.items()))
+        print(f"{replay_path.name}: name tags {shown}")
     comm = work / "comm.json"
     # Dolphin records strictly between startFrame and endFrame, so these give frames first..last.
     # A startFrame above the game's first frame makes it fast-forward there (not recorded).
     # The picture of the last frame can be presented after the playback counter has moved one past it, so
     # Dolphin records one frame more than asked for: anything recorded after `last` is dropped below.
     start_frame = first - 1
-    config.write_comm(comm, replay_path, start_frame=start_frame, end_frame=last + 2)
+    config.write_comm(comm, played, start_frame=start_frame, end_frame=last + 2)
     clip_frames = last - first + 1
     skip_frames = max(0, start_frame - slp.FIRST_FRAME)
     boot_timeout = args.boot_timeout + skip_frames / MIN_SKIP_FPS
@@ -380,6 +429,14 @@ def cmd_render(args) -> int:
         print("error: --start-frame and --end-frame pick frames of one replay; "
               f"{len(args.replays)} replays were given", file=sys.stderr)
         return 2
+    if args.no_nametags and args.nametag:
+        print("error: --no-nametags hides every name tag; to hide only some, give them an empty --nametag (P2=)",
+              file=sys.stderr)
+        return 2
+    ports = [port for port, _ in args.nametag]
+    if len(set(ports)) != len(ports):
+        print("error: --nametag was given twice for the same player", file=sys.stderr)
+        return 2
     if args.keep_background:
         clash = [opt for on, opt in ((args.characters_only, "--characters-only"), (args.hide_items, "--hide-items"),
                                      (args.hide_effects, "--hide-effects")) if on]
@@ -474,6 +531,12 @@ def main(argv=None) -> int:
                     help="with --characters-only: also hide items and projectiles")
     pr.add_argument("--hide-effects", action="store_true",
                     help="with --characters-only: also hide effects (hit sparks, dust, KO blasts...)")
+    pr.add_argument("--nametag", action="append", default=[], type=nametag_arg, metavar="P1=TEXT",
+                    help="change what a player's name tag says (repeat for more players). Only a tag the replay "
+                         "shows can be changed (`info` lists them); an empty TEXT hides it. Up to 8 letters, digits, "
+                         "spaces or . , ' -; other symbols and kana take two of the 8 (docs/nametags.md)")
+    pr.add_argument("--no-nametags", action="store_true",
+                    help="hide every player's name tag, keeping the rest of the HUD")
     pr.add_argument("--static-camera", action="store_true",
                     help="keep the camera still: Melee's fixed camera, which shows the whole stage, without "
                          "screen shake (fighters look smaller; consider --scale 2)")

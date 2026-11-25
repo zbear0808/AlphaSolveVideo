@@ -29,6 +29,7 @@ python3 -m slp2alpha render replay.slp --characters-only
   - `--static-camera`: locks the camera in fixed mode for still framing.
   - `--start-frame N --end-frame M`: renders combo clips directly from Slippi frame numbers.
   - `--shy-guy-sprite IMAGE`: draws Yoshi's Story Shy Guys with your own image or logo.
+  - `--nametag P1=TEXT`, `--no-nametags`: changes what players' name tags say, or hides them ([guide](docs/nametags.md)).
   - `--animelee`: renders with Animelee cel-shaded skins.
   - `--export-camera`: also writes Melee's camera on every frame, for Blender ([`tools/camera-export`](tools/camera-export/README.md)).
   - `--raw-resolution`: records the console's unstretched 640x480 picture, one row per scanline (for CRT effects).

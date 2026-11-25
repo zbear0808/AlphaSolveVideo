@@ -179,6 +179,10 @@ class Commands(unittest.TestCase):
             self.assertIn(flag, a)
         self.assertEqual(a[a.index("--scale") + 1], "2")
 
+    def test_name_tags_go_to_the_render(self):
+        a = self.render_args("--nametag", "P1=ZUBAIR", "--nametag", "P4=")
+        self.assertEqual(a[-4:], ["--nametag", "P1=ZUBAIR", "--nametag", "P4="])
+        self.assertIn("--no-nametags", self.render_args("--no-nametags"))
 
 class Names(unittest.TestCase):
     def test_this_runs_steps_are_added(self):
