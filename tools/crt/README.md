@@ -1,14 +1,37 @@
 # CRT
 
-CRT Royale on a video: TroggleMonkey's original shader, drawn by Blender's GPU module or by [librashader](https://github.com/SnowflakePowered/librashader), on macOS, Linux and Windows. [`slp2video --crt`](../../docs/slp2video.md#the-crt) runs it; it also works on any video by itself.
+A CRT on a video: the original shaders, drawn by Blender's GPU module or by [librashader](https://github.com/SnowflakePowered/librashader), on macOS, Linux and Windows. crt-guest-advanced by default, or its NTSC version, Sony Megatron v2 or CRT Royale. [`slp2video --crt`](../../docs/slp2video.md#the-crt) runs it; it also works on any video by itself.
 
 ```sh
 python3 tools/crt/render_video.py in.mov out.mov --physical-pixels             # each pixel a physical CRT pixel
 python3 tools/crt/render_video.py in.mov out.mov --physical-pixels --scale 8 --triads-per-pixel 1
 python3 tools/crt/render_video.py in.mp4 out.mov --size 1920x1080 --lines 240  # an emulated 240-line signal
+python3 tools/crt/render_video.py in.mov out.mov --shader royale --mask slot   # another shader, another look
+python3 tools/crt/render_video.py --list-masks                                 # each shader's looks
 python3 tools/crt/install_librashader.py                                       # librashader-cli, for Windows and the tests (needs Rust)
 python3 tools/crt/test_crt.py                                                  # includes real renders, with what's installed
 ```
+
+## The shaders
+
+`--shader` picks one, `--mask` one of its looks. Each shader's default look is `grille`, an aperture grille. `--params` adds more of the shader's own parameters after the look's, and replaces any of the look's it names.
+
+| `--shader` | Shader | Looks (`--mask`) | Light kept | Across frames |
+|---|---|---|---|---|
+| `guest` (default) | crt-guest-advanced, by guest(r) | 12: `grille`, `grille-soft`, `grille-strong`, `grille-wide`, `slot`, `shadow`, `cgwg`, `lottes-grille`, `lottes-shadow`, `rgbx`, `rrggbbx`, `none` | 57–72% (`grille`) | afterglow |
+| `guest-ntsc` | its NTSC version: a composite signal in front of the same CRT, with its colour fringes and bleed | the same 12 | about guest's | afterglow, and the chroma phase alternates every frame |
+| `megatron` | Sony Megatron Colour Video Monitor v2, by MajorPainTheCactus, in SDR | `grille`, `slot`, `shadow`, `grille3`, and 4 real monitors: `pvm2730`, `pvm20l4`, `pvm1910`, `mx8000` | 19–20% (`grille`), 25–27% (`grille3`, `shadow`) | nothing |
+| `royale` | CRT Royale, by TroggleMonkey: this folder's only shader before 25 November 2026 | `grille`, `slot`, `shadow` | 83–94% | nothing |
+
+- **Where the settings come from.** [`shaders.py`](shaders.py) has a profile for each shader: its preset, its Blender chain, its looks, and the parameters a look takes at a given size. They are the crt-royale TouchDesigner project's render profiles (`pipelines/<name>/video.py`), which worked them out against the original shaders. For every look, in five sizes (slp2video's, the standard 1280, 1920x1080, 8x physical pixels and a 2.5 px triad), `shaders.py` writes the same parameter string as the project's own modules [verified: `test_shaders.py`]. Royale's are exactly what `render_video.py` wrote before: on the same clip, `--shader royale` gives the same frames as the previous version, decoded from ProRes, with Blender and with `librashader-cli`'s Metal [verified, 25 November].
+- **The light kept** is the picture's mean light against the source's, linear, on the TouchDesigner project's test card, jellybeans and movie frame [reported: its `pipelines/*/README.md`]. guest's looks keep from 45–51% (`grille-strong`) to 86–91% (`cgwg`), and 99% with no mask. guest adds its blurred picture back through the mask (`bloom 0.5`, `bmask1 1`), which brightens it without washing out the stripes.
+- **Megatron is dark in SDR, on purpose.** Its mask is binary and at full strength: each output pixel lights one primary, so about three quarters of the light is gone. The shader expects an HDR display to make up for it. It's kept faithful here: a neutral 2.2 transfer (`hcrt_colour_space 2`, as upstream's SDR preset) and `hcrt_brightness` at least 0.2, which keeps the tone curve neutral, nothing more. Turn the display up. Its mask is drawn per output pixel, so play its videos at 100% or an integer zoom; ProRes 4444 at `-qscale:v 2` keeps it, 4:2:0 codecs don't [reported].
+- **The triad pitch.** Royale's triad is 3 px at 1280 px wide, scaled with the width, or the pitch asked for. guest's mask period follows the smaller side (3 px at 1280), or matches the pitch asked for exactly (`masksize`, `mask_zoom`). Megatron's patterns are fixed: a pitch picks the nearest of the look's screen type (grille 3, 4, 5, 7 or 13 px; shadow mask 6 or 12; slot mask 3, 4, 5 or 7). At slp2video's 3 px, its `grille` (4 px R G B X) becomes the 3 px R G B grille, `grille3`'s.
+- **Scanlines and aspect.** guest and Megatron draw one beam per source row by design, and have no aspect parameter: the picture fills the CRT, so `--aspect` only changes the output size. Royale gets the aspect.
+
+### The afterglow
+
+guest's phosphors glow on for a few frames after the beam has gone: a white field turned black falls 222.4 → 35.7, 28.8, 22.6, … and is gone after 15 frames. It only shows below 8/255, on dark trails behind bright things [reported: the TouchDesigner project's `temporal_results.json`]. Blender keeps it from frame to frame. `--no-afterglow` draws guest and guest-ntsc without it: `AS=0`, the afterglow's strength in `pre-shaders-afterglow.slang`. Each frame is then drawn as if it were the first. The other shaders have no afterglow, so it changes nothing there.
 
 ## Blender draws it, on macOS and Linux
 
@@ -28,11 +51,12 @@ Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto
   The ranges run from a whole drawn game to fighters alone.
 - **On Linux it uses Blender's OpenGL backend,** which drew a frame in 26 ms there against its Vulkan backend's 43. Blender takes the first GPU EGL lists (the NVIDIA GPU on the PC). It runs without a display, over SSH.
 - **If Blender can't draw** (no GPU, no `gpu.init` in an older Blender), `auto` says why and goes on with `librashader-cli`.
-- **Only the vendored preset.** `--preset` with any other goes to `librashader-cli`. So does Windows for now: Blender gets the frames through inherited pipes, which `subprocess` passes on macOS and Linux only.
+- **Only the vendored presets,** each with its chain in `blender-chain/<shader>/`. `--preset` with any other goes to `librashader-cli`, with `--shader`'s parameters. So does Windows for now: Blender gets the frames through inherited pipes, which `subprocess` passes on macOS and Linux only.
 
 `render_video.py` is the crt-royale TouchDesigner project's `tools/render_video.py`, brought into this repo. It has the same options and works out the same settings (mask, triad size, aspect, output size). On the same input and settings it gave exactly the same pixels on the Mac: physical pixels with and without alpha, and standard mode. What changed:
 
-- **The shaders are here**, in [`slang-shaders/`](slang-shaders/README.md): the 38 files of libretro's slang-shaders (commit `2345ee91`) that `crt/crt-royale.slangp` needs, unmodified, with their licences. A frame rendered with them is identical to one rendered with the project's full checkout.
+- **The shaders are here**, in [`slang-shaders/`](slang-shaders/README.md): the files of libretro's slang-shaders (commit `2345ee91`) that the four presets need, unmodified, with their licences. A frame rendered with them is identical to one rendered with the project's full checkout.
+- **guest is the default.** The project's script drew Royale unless told otherwise. Its other profiles came over as `--shader` (above).
 - **The runtime suits the platform.** `--runtime auto` (the default) tries Blender first on macOS and Linux (above). Then it tries this platform's librashader runtimes in order on the first frame, and keeps the first that draws it at the size asked for: Metal on macOS; Direct3D 11, then 12, wgpu, Vulkan, OpenGL on Windows; wgpu, then Vulkan, OpenGL on Linux. The original always asked for Metal.
 - **Frames stream through.** One ffmpeg decodes the video, and a second encodes the frames in order as they're drawn. With `librashader-cli` the frames go to it as they come, 4 at a time (`--jobs`), and only the frames in flight are on disk, as BMP files: no PNG compression, which made each frame 0.1 s slower to write and slower again to read back. 150 frames at 3504x2880 with alpha took 30 s instead of 50 on an M1, with identical output.
 - **Alpha follows the picture's framing.** The alpha goes through the same filters as the colour. The original took it from the unframed input, which only mattered in standard mode.
@@ -56,6 +80,10 @@ Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto
 - **What a frame costs on Linux.** Each `librashader-cli` run takes about 1 s of CPU on the PC before it draws anything, even for a 64x48 frame: starting up, and compiling the preset's 12 passes. librashader keeps compiled shaders on disk for Metal (`~/Library/Caches/librashader`), but on the PC its cache folder stayed empty. So a frame takes about 1.7 s there on any of its GPUs, against 0.5 s on the Mac, with 4 at a time. The encoder is the other limit. On CRT frames of a full stage, the PC's `prores_ks` manages about 0.4 frames a second (`prores_aw` 2.7, `libx264` 1.9); mostly transparent frames go much faster.
 - **Left out:** Direct3D 12, which downloads a prebuilt DXC while building; OpenGL, which needs X11's development packages to build on Linux, and a window to run; Direct3D 9.
 - **Found:** `--librashader PATH` or `LIBRASHADER_CLI`, then `packages/librashader/bin`, the PATH and `~/.cargo/bin`.
+- **Each frame is drawn in a fresh chain,** so nothing carries over from one frame to the next:
+  - **guest** loses its afterglow. `render_video.py` says so once and goes on. Without Blender, that's the price; it only shows below 8/255.
+  - **guest-ntsc** needs the frame's parity for its chroma phase. `librashader-cli render -f N` draws the same frame N + 1 times, the last with frame count N, so odd frames are drawn with `-f 1`. That alternates the phase as one chain does: on a still picture 584 wide, frames 0 and 2 come out identical, 0 and 1 apart (24.7 dB PSNR), and a 3504x2880 frame took 0.35 s instead of 0.32 on an M1 [verified, 25 November]. Below 301 source pixels the NTSC passes use 3 phases and merge both fields, so the frames don't alternate at all.
+  - **Megatron and Royale** keep nothing, so they come out as they would in one chain.
 
 ## What was checked
 
@@ -90,11 +118,13 @@ On lavapipe, 10 frames at 3840x2880 took 28 s with 4 at a time on 8 CPU threads:
 | File | |
 |---|---|
 | `render_video.py` | the renderer: the command, and the functions `slp2video` calls |
+| `shaders.py` | the shaders: each one's preset, chain, looks and parameters (`--shader`, `--mask`, `--list-masks`) |
 | `blender_crt.py` | runs inside Blender: the preset's passes drawn with Blender's `gpu` module, frames through pipes |
 | `blender-chain/` | each vendored preset as `librashader-cli` 0.12.1 compiles it (`royale/`, `guest/`, `guest-ntsc/`, `megatron/`), for `blender_crt.py` |
 | `vendor_chain.py` | writes `blender-chain/` with `librashader-cli` (`write`), or checks it (`check`), for one shader or all |
 | `install_librashader.py` | builds `librashader-cli` for this platform into `packages/librashader/` |
 | `slang-shaders/` | the vendored shaders, `MANIFEST` (each file's git blob id) and their README |
 | `vendor_shaders.py` | copies the shaders from a slang-shaders checkout (`copy DIR`), or checks the copy (`check`) |
-| `test_crt.py` | unit tests: the settings, the runtime order, the encoders, the shader copy and the chain, the BMP frames, and real renders with Blender and with `librashader-cli`, against each other |
+| `test_crt.py` | unit tests: the settings, the runtime order, the encoders, the shader copy and the chain, the BMP frames, and real renders with Blender and with `librashader-cli`, against each other. It runs `test_shaders.py` too |
+| `test_shaders.py` | the profiles against the TouchDesigner project's parameters, the looks checked per shader, `--no-afterglow`, the chain per shader, and guest-ntsc's phase through `librashader-cli` |
 | `linux.Dockerfile` | the Linux build and test container |

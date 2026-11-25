@@ -17,7 +17,7 @@ cd tools/slp2alpha
 python3 -m slp2alpha render replay.slp --characters-only
 ```
 
-- **One command for everything:** [`tools/slp2video`](tools/slp2video/README.md) takes a replay to a finished video: your logo or sprite on the Shy Guys, your 3D model in place of the stage (fixed or moving camera), the background kept or removed, transparency or a colour, regular Melee or Animelee, and a CRT finish at the console's native resolution ([guide](docs/slp2video.md)). The CRT is [`tools/crt`](tools/crt/README.md): CRT Royale through librashader, with its shaders in this repo, on Metal, Direct3D 11 or Vulkan:
+- **One command for everything:** [`tools/slp2video`](tools/slp2video/README.md) takes a replay to a finished video: your logo or sprite on the Shy Guys, your 3D model in place of the stage (fixed or moving camera), the background kept or removed, transparency or a colour, regular Melee or Animelee, and a CRT finish at the console's native resolution ([guide](docs/slp2video.md)). The CRT is [`tools/crt`](tools/crt/README.md): crt-guest-advanced (or its NTSC version, Sony Megatron v2 or CRT Royale, `--crt-shader`), the original shaders in this repo, drawn by Blender or librashader on Metal, Direct3D 11 or Vulkan:
 
   ```sh
   python3 tools/slp2video/slp2video.py replay.slp --model statue.glb --animelee --crt
