@@ -479,9 +479,10 @@ class Stream(unittest.TestCase):
         frames, lines = run_stream(self.exe, rv.PRESET, (width, height), (settings.width, settings.height),
                                    [grey] * 2, settings.params)
         self.assertEqual(len(frames), 2)
-        self.assertTrue(lines[0].startswith("CRT_READY "), lines)
-        self.assertIn("CRT_FRAMES 2", lines)
-        self.assertTrue(lines[-1].startswith("CRT_DONE 2 "), lines)
+        reports = [line for line in lines if line.startswith("CRT_")]   # drivers may write their own lines too
+        self.assertTrue(reports[0].startswith("CRT_READY "), lines)
+        self.assertEqual(reports[1:3], ["CRT_FRAMES 1", "CRT_FRAMES 2"])
+        self.assertTrue(reports[-1].startswith("CRT_DONE 2 "), lines)
         w, h = settings.width, settings.height
         self.assertEqual(len(frames[1]), w * h * 4)
         rows = [frames[1][y * w * 4:(y + 1) * w * 4] for y in range(h)]

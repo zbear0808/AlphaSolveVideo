@@ -136,6 +136,8 @@ Against `librashader-cli` on the same machine, frames 0, 60 and 119 of a clip, e
 
 If the Blender CRT ever can't keep within the bar (a later Blender, another GPU), the other way to keep the preset loaded is `crt-stream`: a small Rust program on the `librashader` crate (runtime-vk on Linux, runtime-mtl on the Mac), with the same pipes in and out.
 
+**Built, 25 November,** for guest's afterglow without Blender: [`tools/crt/crt-stream/`](../tools/crt/README.md#crt-stream-one-librashader-chain-without-blender), on Metal and wgpu rather than Vulkan, and built by `install_librashader.py` on each machine rather than in the container ([`plan-crt-shaders.md`](plan-crt-shaders.md) 4.5).
+
 - **For:** it would give librashader's own frames.
 - **Against:** it needs Rust to build. The PC has none; it would build in the `asv-linux` container, as `librashader-cli` is [verified]. It's also 2–3 days instead of 1–1.5.
 - **Its speed** would be about the same, since the encoder sets the pace either way [estimate].

@@ -323,9 +323,9 @@ mod wgpu_runtime {
                 | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                 | wgpu::Features::FLOAT32_FILTERABLE;
             let features = adapter.features() & wanted;
-            let max = a.output.0.max(a.output.1).max(a.input.0).max(a.input.1);
+            // The largest textures the adapter has, for outputs over the default 8192 pixels
             let limits = wgpu::Limits {
-                max_texture_dimension_2d: max.max(wgpu::Limits::default().max_texture_dimension_2d),
+                max_texture_dimension_2d: adapter.limits().max_texture_dimension_2d,
                 ..wgpu::Limits::default()
             };
             let (device, queue) = adapter
@@ -494,6 +494,15 @@ fn make_drawer(a: &Args) -> Result<Box<dyn Drawer>> {
     }
 }
 
+/// Runs `f` in an autorelease pool on Apple platforms, so the Objective-C objects each frame makes (command
+/// buffers, texture views) go when it's drawn, not at the end of the video.
+fn pooled<T>(f: impl FnOnce() -> T) -> T {
+    #[cfg(target_vendor = "apple")]
+    return objc2::rc::autoreleasepool(|_| f());
+    #[cfg(not(target_vendor = "apple"))]
+    f()
+}
+
 /// Fills `buf` from `r`; false at the end of the stream before the first byte.
 fn read_frame(r: &mut impl Read, buf: &mut [u8]) -> Result<bool> {
     let mut got = 0;
@@ -551,11 +560,11 @@ fn run(a: Args) -> Result<()> {
             return Ok(());
         }
         for step in 0..a.warmup {
-            drawer.draw(&frame, step, false, &mut out)?;
+            pooled(|| drawer.draw(&frame, step, false, &mut out))?;
         }
         let mut count = a.warmup;
         loop {
-            if drawer.draw(&frame, count, true, &mut out)? {
+            if pooled(|| drawer.draw(&frame, count, true, &mut out))? {
                 send(&mut out, spare())?;
             }
             count += 1;
@@ -563,7 +572,7 @@ fn run(a: Args) -> Result<()> {
                 break;
             }
         }
-        if drawer.finish(&mut out)? {
+        if pooled(|| drawer.finish(&mut out))? {
             send(&mut out, spare())?;
         }
         Ok(())
