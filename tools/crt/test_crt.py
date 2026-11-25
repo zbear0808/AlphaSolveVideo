@@ -7,12 +7,14 @@
 from __future__ import annotations
 
 import json
+import os
 import struct
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import List, Optional, Tuple
 from unittest import mock
 
 HERE = Path(__file__).resolve().parent
@@ -117,10 +119,13 @@ class Runtimes(unittest.TestCase):
 
 
 class Candidates(unittest.TestCase):
-    """Blender first where it can draw, then librashader-cli's runtimes."""
+    """Blender first where it can draw, then crt-stream, then librashader-cli's runtimes."""
 
     def setUp(self):
         patcher = mock.patch.object(rv, "runtimes_of", return_value=("metal", "wgpu", "vulkan", "d3d11"))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rv, "find_stream", return_value=None)   # whether or not it's built here
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -147,6 +152,28 @@ class Candidates(unittest.TestCase):
     def test_another_preset_goes_to_librashader(self):
         other = rv.HERE / "slang-shaders" / "other.slangp"
         self.assertEqual(rv.candidates("cli", "blender", platform="linux", preset=other)[0], "wgpu")
+
+    def test_crt_stream_comes_after_blender(self):
+        self.assertEqual(rv.candidates("cli", "blender", platform="darwin", stream="cs"),
+                         ["blender", "stream", "metal", "wgpu"])
+        self.assertEqual(rv.candidates("cli", "blender", platform="win32", stream="cs")[:2], ["stream", "d3d11"])
+        self.assertEqual(rv.candidates(None, None, platform="linux", stream="cs"), ["stream"])
+        other = rv.HERE / "slang-shaders" / "other.slangp"   # any preset: it's librashader
+        self.assertEqual(rv.candidates("cli", "blender", platform="linux", preset=other, stream="cs")[0], "stream")
+
+    def test_crt_stream_asked_for(self):
+        self.assertEqual(rv.candidates("cli", "blender", "stream", platform="win32", stream="cs"), ["stream"])
+        self.assertEqual(rv.candidates("cli", "blender", "wgpu", platform="linux", stream="cs"), ["wgpu"])
+        with self.assertRaises(rv.CrtError):
+            rv.candidates("cli", "blender", "stream", platform="linux", stream="")
+
+    def test_crt_stream_reads_stdin_and_writes_stdout(self):
+        settings = rv.physical_settings(584, 480, 6, **ROYALE)
+        self.assertEqual(rv.stream_command("cs", Path("p.slangp"), (584, 480), settings),
+                         ["cs", "--preset", "p.slangp", "--input", "584x480", "--output", "3504x2880",
+                          "--params", settings.params])
+        self.assertEqual(rv.stream_command("cs", Path("p.slangp"), (584, 480), settings, warmup=30)[-2:],
+                         ["--warmup", "30"])
 
     def test_blender_reads_and_writes_through_inherited_pipes(self):
         settings = rv.physical_settings(584, 480, 6, **ROYALE)
@@ -605,6 +632,134 @@ class BlenderShaders(unittest.TestCase):
         warmed = self.draw("guest", [white, black], (side, side), (256, 256), warmup=2)
         self.assertEqual(warmed, plain[2:])
         self.assertNotEqual(plain[3], self.draw("guest", [black], (side, side), (256, 256))[0])   # the afterglow
+
+
+
+# crt-guest-advanced's afterglow on a flat field, 288x288 drawn at 1280x1280 with the shader's defaults: the mean
+# level inside a 48 px border on the last of 10 white frames, then on each of the black frames after them. Measured
+# by the crt-royale TouchDesigner project with its tools/lrs-seq (pipelines/guest_advanced/temporal_results.json).
+AFTERGLOW = [222.391, 35.744, 28.819, 22.613, 18.266, 14.782, 12.129, 9.525, 6.931, 6.095, 4.348, 3.497, 2.571,
+             1.681, 1.0, 1.0] + [0.0] * 10
+
+
+def run_stream(exe: str, preset: Path, size: Tuple[int, int], out_size: Tuple[int, int], frames: List[bytes],
+               params: str = "", env: Optional[dict] = None) -> Tuple[List[bytes], List[str]]:
+    """Frames through crt-stream: (the frames it wrote, its stderr lines)."""
+    cmd = [exe, "--preset", str(preset), "--input", f"{size[0]}x{size[1]}", "--output", f"{out_size[0]}x{out_size[1]}"]
+    p = subprocess.run(cmd + (["--params", params] if params else []), input=b"".join(frames), capture_output=True,
+                       env=env)
+    lines = p.stderr.decode("utf-8", "replace").splitlines()
+    if p.returncode != 0:
+        raise AssertionError(f"crt-stream failed (exit {p.returncode}): {' | '.join(lines[-4:])}")
+    n = out_size[0] * out_size[1] * 4
+    return [p.stdout[i:i + n] for i in range(0, len(p.stdout), n)], lines
+
+
+class Stream(unittest.TestCase):
+    """crt-stream drawing on this machine: needs it built (install_librashader.py) and a GPU, or Mesa's lavapipe
+    on Linux."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.exe = rv.find_stream()
+        if not cls.exe:
+            raise unittest.SkipTest("no crt-stream: python3 tools/crt/install_librashader.py")
+
+    def test_a_grey_frame_becomes_scanlines_and_phosphor_stripes(self):
+        width = height = 136   # 816x816 at 6x: room for crt-royale's mask tiles (see Render)
+        scale = 6
+        settings = rv.physical_settings(width, height, scale, **ROYALE)
+        grey = bytes([128, 128, 128, 255]) * (width * height)
+        frames, lines = run_stream(self.exe, rv.shaders.get("royale").preset, (width, height),
+                                   (settings.width, settings.height), [grey] * 2, settings.params)
+        self.assertEqual(len(frames), 2)
+        reports = [line for line in lines if line.startswith("CRT_")]   # drivers may write their own lines too
+        self.assertTrue(reports[0].startswith("CRT_READY "), lines)
+        self.assertEqual(reports[1:3], ["CRT_FRAMES 1", "CRT_FRAMES 2"])
+        self.assertTrue(reports[-1].startswith("CRT_DONE 2 "), lines)
+        w, h = settings.width, settings.height
+        self.assertEqual(len(frames[1]), w * h * 4)
+        rows = [frames[1][y * w * 4:(y + 1) * w * 4] for y in range(h)]
+        middle = range(h // 4, 3 * h // 4)
+        level = sum(sum(rows[y]) - sum(rows[y][3::4]) for y in middle) / (len(middle) * w * 3)
+        self.assertGreater(level, 20, "the picture is nearly black")
+        by_phase = [0] * scale
+        for y in middle:
+            by_phase[y % scale] += sum(rows[y]) - sum(rows[y][3::4])
+        self.assertGreater(max(by_phase), 1.15 * min(by_phase), f"no scanlines {by_phase}")
+        triad = int(settings.triad)
+        for channel in range(3):
+            by_column = [sum(sum(rows[y][(x * 4 + channel)::triad * 4]) for y in middle) for x in range(triad)]
+            self.assertGreater(max(by_column), 1.5 * min(by_column) + 1,
+                               f"no phosphor stripes in channel {'rgb'[channel]} {by_column}")
+
+    def test_the_first_frame_is_librashader_clis(self):
+        """Frame 0 of a fresh chain is what librashader-cli draws, on the same runtime: Metal on macOS, wgpu
+        elsewhere."""
+        try:
+            cli = rv.find_librashader()
+        except locate.NotFound:
+            raise unittest.SkipTest("no librashader-cli: python3 tools/crt/install_librashader.py")
+        runtime = "metal" if sys.platform == "darwin" else "wgpu"
+        if runtime not in rv.runtimes_of(cli):
+            self.skipTest(f"this librashader-cli has no {runtime} runtime")
+        width = height = 136
+        rgb = bytes(v for y in range(height) for x in range(width)
+                    for v in ((x * 7) % 256, (y * 5) % 256, ((x + y) * 3) % 256))
+        rgba = b"".join(rgb[i:i + 3] + b"\xff" for i in range(0, len(rgb), 3))
+        bgr = b"".join(rgb[i:i + 3][::-1] for i in range(0, len(rgb), 3))
+        # crt-stream's wgpu takes the fast GPU, librashader-cli's the first one Vulkan lists: the same one here
+        env = dict(os.environ, WGPU_POWER_PREF=os.environ.get("WGPU_POWER_PREF", "none"))
+        out = rv.physical_settings(width, height, 6, **ROYALE)
+        for shader, params in (("royale", out.params), ("guest", GUEST_GRILLE), ("guest-ntsc", GUEST_GRILLE),
+                               ("megatron", MEGATRON_GRILLE3)):
+            preset, settings = rv.shaders.get(shader).preset, rv.Settings(out.width, out.height, params, 3.0, "")
+            with self.subTest(shader), tempfile.TemporaryDirectory() as tmp:
+                frames, _ = run_stream(self.exe, preset, (width, height), (settings.width, settings.height), [rgba],
+                                       settings.params, env)
+                src, dst = Path(tmp) / "in.bmp", Path(tmp) / "out.bmp"
+                src.write_bytes(rv.bmp_bytes(bgr, width, height))
+                rv.draw(cli, runtime, preset, settings, src, dst)
+                w, h, step, rows = read_bmp(dst)
+                a, total = frames[0], 0
+                for y, row in enumerate(rows):
+                    base = y * w * 4
+                    for x in range(w):
+                        for c in range(3):
+                            total += abs(a[base + x * 4 + c] - row[x * step + 2 - c])
+                mean = total / (3 * w * h)
+                self.assertLessEqual(mean, 0.05, f"{shader}: crt-stream's frame 0 is {mean:.4f}/255 from "
+                                                 f"librashader-cli's ({runtime})")
+
+    def test_guests_afterglow_decays_as_measured(self):
+        size, out, border = 288, 1280, 48
+        white, black = bytes([255, 255, 255, 255]) * (size * size), bytes([0, 0, 0, 255]) * (size * size)
+        frames, _ = run_stream(self.exe, rv.shaders.get("guest").preset, (size, size), (out, out),
+                               [white] * 10 + [black] * 25)
+        self.assertEqual(len(frames), 35)
+
+        def level(frame: bytes) -> float:
+            total = 0
+            for y in range(border, out - border):
+                row = frame[(y * out + border) * 4:(y * out + out - border) * 4]
+                total += sum(row) - sum(row[3::4])
+            return total / ((out - 2 * border) ** 2 * 3)
+
+        got = [level(f) for f in frames[9:9 + len(AFTERGLOW)]]
+        for i, (g, want) in enumerate(zip(got, AFTERGLOW)):
+            self.assertAlmostEqual(g, want, delta=1.0, msg=f"frame {9 + i}: {[round(v, 1) for v in got]}")
+
+    def test_the_ntsc_phase_alternates(self):
+        width, height = 320, 240   # over 300 px wide: 2 phases, alternating
+        rgba = bytes(v for y in range(height) for x in range(width)
+                     for v in ((x * 7) % 256, (y * 5) % 256, ((x + y) * 3) % 256, 255))
+        drawn, _ = run_stream(self.exe, rv.shaders.get("guest-ntsc").preset, (width, height), (960, 720), [rgba] * 3)
+
+        def apart(a, b):
+            return sum(abs(x - y) for x, y in zip(a, b)) / len(a)
+
+        self.assertGreater(apart(drawn[0], drawn[1]), 1.0)
+        self.assertLess(apart(drawn[0], drawn[2]), 0.1)
 
 
 if __name__ == "__main__":

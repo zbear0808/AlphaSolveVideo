@@ -378,6 +378,9 @@ class Runtimes(unittest.TestCase):
         patcher = mock.patch.object(rv, "runtimes_of", return_value=("metal", "wgpu"))
         patcher.start()
         self.addCleanup(patcher.stop)
+        patcher = mock.patch.object(rv, "find_stream", return_value=None)   # whether or not it's built here
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_blender_draws_every_vendored_preset(self):
         for s in shaders.SHADERS.values():

@@ -1,8 +1,8 @@
-# Builds librashader-cli 0.12.1 for the CRT (tools/crt/install_librashader.py) on Windows, Linux and macOS, runs the
-# CRT's tests there, including a real render (test_crt.py's Render: scanlines and phosphor stripes from a grey
-# frame), and uploads each program. Run it by hand: Actions tab > "CRT renderer" > Run workflow, or
-# `gh workflow run crt.yml`. To skip building on a PC, unpack the artifact's librashader-cli into
-# packages/librashader/bin/ (tools/crt/README.md).
+# Builds librashader-cli 0.12.1 and crt-stream for the CRT (tools/crt/install_librashader.py) on Windows, Linux and
+# macOS, runs the CRT's tests there, including real renders (test_crt.py's Render and Stream: scanlines and phosphor
+# stripes from a grey frame; crt-stream's frame 0 against librashader-cli's; guest's afterglow across frames), and
+# uploads both programs. Run it by hand: Actions tab > "CRT renderer" > Run workflow, or `gh workflow run crt.yml`.
+# To skip building on a PC, unpack the artifact into packages/librashader/bin/ (tools/crt/README.md).
 name: CRT renderer
 
 on:
@@ -15,13 +15,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Windows: Direct3D 11, then wgpu. A runner has no GPU, only Windows' software adapter (WARP). A short
-          # work folder keeps the Rust build's paths under Windows' 260-character limit.
+          # Windows: Direct3D 11, then wgpu; crt-stream on wgpu (Direct3D 12 or Vulkan). A runner has no GPU, only
+          # Windows' software adapter (WARP). A short work folder keeps the Rust build's paths under Windows'
+          # 260-character limit.
           - { name: Windows x86_64, runner: windows-2022, cache: 'C:\asv', artifact: librashader-cli-windows-x86_64 }
-          # Linux: wgpu on Vulkan, here Mesa's lavapipe (Vulkan on the CPU)
+          # Linux: wgpu on Vulkan (both programs), here Mesa's lavapipe (Vulkan on the CPU)
           - { name: Linux x86_64, runner: ubuntu-24.04, cache: /tmp/asv, artifact: librashader-cli-linux-x86_64 }
           - { name: Linux arm64, runner: ubuntu-24.04-arm, cache: /tmp/asv, artifact: librashader-cli-linux-arm64 }
-          # macOS: Metal
+          # macOS: Metal (both programs)
           - { name: macOS arm64, runner: macos-15, cache: /tmp/asv, artifact: librashader-cli-macos-arm64 }
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
@@ -42,7 +43,7 @@ jobs:
           arch: x64
       - name: Install Rust 1.88.0
         run: rustup toolchain install 1.88.0 --profile minimal && rustup default 1.88.0
-      - name: Build librashader-cli
+      - name: Build librashader-cli and crt-stream
         run: python tools/crt/install_librashader.py
       - name: Check the vendored shaders
         run: python tools/crt/vendor_shaders.py check
@@ -50,7 +51,7 @@ jobs:
         run: python tools/crt/vendor_chain.py check
       - name: Test, with a real render
         run: python tools/crt/test_crt.py -v
-      - name: Upload librashader-cli
+      - name: Upload librashader-cli and crt-stream
         if: always()
         uses: actions/upload-artifact@v6
         with:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install librashader-cli, which the CRT renders with, into packages/librashader/.
+"""Install librashader-cli and crt-stream, which the CRT renders with, into packages/librashader/.
 
     python3 tools/crt/install_librashader.py [--features LIST] [--force]
 
@@ -15,8 +15,11 @@ librashader-cli's own Vulkan runtime draws at the input's size whatever size it'
 draws through wgpu on Linux (it checks every frame's size).
 
 The build needs a C++ compiler: Xcode's command line tools, Visual Studio's C++ build tools, or build-essential.
-It takes a few minutes; its build folder stays in the cache folder, so another run is quick. render_video.py finds
-the program in packages/librashader/bin/ (also on the PATH, in ~/.cargo/bin, or through LIBRASHADER_CLI).
+Then it builds crt-stream (tools/crt/crt-stream, Rust, on the librashader 0.12.1 crate, with its Cargo.lock): one
+filter chain for a whole video, Metal on macOS and wgpu (Vulkan, Direct3D 12) on Linux and Windows.
+
+It takes a few minutes; the build folders stay in the cache folder, so another run is quick. render_video.py finds
+the programs in packages/librashader/bin/ (also on the PATH, or through LIBRASHADER_CLI and CRT_STREAM).
 """
 
 from __future__ import annotations
@@ -34,6 +37,7 @@ import render_video  # noqa: E402
 from slp2alpha import locate  # noqa: E402  (render_video puts slp2alpha on the path)
 
 
+STREAM_SOURCE = HERE / "crt-stream"
 FEATURES = {"darwin": ["metal", "wgpu"], "win32": ["d3d11", "wgpu"], "linux": ["wgpu", "vulkan"]}
 
 
@@ -70,7 +74,21 @@ def main(argv=None) -> int:
         raise RuntimeError(f"{exe} says {version.stdout.strip() or version.stderr.strip()!r}, "
                            f"not {render_video.LIBRASHADER_VERSION}")
     print(f"{exe}: {version.stdout.strip()}, runtimes {', '.join(render_video.runtimes_of(exe))}")
+    install_stream(root)
     return 0
+
+
+def install_stream(root: Path) -> None:
+    """crt-stream from tools/crt/crt-stream, as its Cargo.lock pins it, into root/bin."""
+    cmd = [find_cargo(), "install", "--path", str(STREAM_SOURCE), "--locked", "--force", "--root", str(root)]
+    env = dict(os.environ, CARGO_TARGET_DIR=str(locate.cache_root() / "crt-stream-build"))
+    print("$ " + " ".join(cmd), flush=True)
+    subprocess.run(cmd, env=env, check=True)
+    exe = root / "bin" / render_video.STREAM_EXE
+    version = subprocess.run([str(exe), "--version"], capture_output=True, encoding="utf-8", errors="replace")
+    if version.returncode != 0:
+        raise RuntimeError(f"{exe} doesn't run: {version.stderr.strip()}")
+    print(f"{exe}: {version.stdout.strip()}")
 
 
 if __name__ == "__main__":

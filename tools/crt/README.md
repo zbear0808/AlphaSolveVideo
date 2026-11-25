@@ -1,6 +1,6 @@
 # CRT
 
-A CRT on a video: the original shaders, drawn by Blender's GPU module or by [librashader](https://github.com/SnowflakePowered/librashader), on macOS, Linux and Windows. crt-guest-advanced by default, or its NTSC version, Sony Megatron v2 or CRT Royale. [`slp2video --crt`](../../docs/slp2video.md#the-crt) runs it; it also works on any video by itself.
+A CRT on a video: the original shaders, drawn by Blender's GPU module or by [librashader](https://github.com/SnowflakePowered/librashader) (`crt-stream`, `librashader-cli`), on macOS, Linux and Windows. crt-guest-advanced by default, or its NTSC version, Sony Megatron v2 or CRT Royale. [`slp2video --crt`](../../docs/slp2video.md#the-crt) runs it; it also works on any video by itself.
 
 ```sh
 python3 tools/crt/render_video.py in.mov out.mov --physical-pixels             # each pixel a physical CRT pixel
@@ -8,7 +8,7 @@ python3 tools/crt/render_video.py in.mov out.mov --physical-pixels --scale 8 --t
 python3 tools/crt/render_video.py in.mp4 out.mov --size 1920x1080 --lines 240  # an emulated 240-line signal
 python3 tools/crt/render_video.py in.mov out.mov --shader royale --mask slot   # another shader, another look
 python3 tools/crt/render_video.py --list-masks                                 # each shader's looks
-python3 tools/crt/install_librashader.py                                       # librashader-cli, for Windows and the tests (needs Rust)
+python3 tools/crt/install_librashader.py                                       # librashader-cli and crt-stream (needs Rust)
 python3 tools/crt/test_crt.py                                                  # includes real renders, with what's installed
 ```
 
@@ -33,9 +33,9 @@ python3 tools/crt/test_crt.py                                                  #
 
 guest's phosphors glow on for a few frames after the beam has gone: a white field turned black falls 222.4 → 35.7, 28.8, 22.6, … and is gone after 15 frames. It only shows below 8/255, on dark trails behind bright things [reported: the TouchDesigner project's `temporal_results.json`].
 
-- **Blender keeps it** from frame to frame. On the Mac, a moving test picture followed by black frames, at 3x physical pixels: the first black frame came out 11.4/255 above a fresh chain's black frame on average (at most 54), two frames later 7.6. guest-ntsc: 10.3 and 7.0. The test picture's own frames, all bright, were identical to a fresh chain's [verified, 25 November].
+- **Blender and `crt-stream` keep it** from frame to frame; `librashader-cli`, one frame at a time, loses it and says so. In Blender on the Mac, a moving test picture followed by black frames, at 3x physical pixels: the first black frame came out 11.4/255 above a fresh chain's black frame on average (at most 54), two frames later 7.6. guest-ntsc: 10.3 and 7.0. The test picture's own frames, all bright, were identical to a fresh chain's [verified, 25 November].
 - **`--no-afterglow`** draws guest and guest-ntsc without it: `AS=0`, the afterglow's strength in `pre-shaders-afterglow.slang`. Each frame is then drawn as if it were the first: in the same test, every frame was identical to a fresh chain's first frame of the same picture, for both shaders [verified]. The other shaders have no afterglow, so it changes nothing there.
-- **`--warmup N`** (Blender only) draws the first frame N extra times before the video, so the afterglow starts as if the video had been playing. The video then starts at frame count N, so an odd N flips guest-ntsc's phase. Not needed for most videos: the TouchDesigner project found frame 0 already settled, apart from near-black gradients [reported].
+- **`--warmup N`** (Blender and `crt-stream`) draws the first frame N extra times before the video, so the afterglow starts as if the video had been playing. The video then starts at frame count N, so an odd N flips guest-ntsc's phase. Not needed for most videos: the TouchDesigner project found frame 0 already settled, apart from near-black gradients [reported].
 
 ## Blender draws it, on macOS and Linux
 
@@ -55,14 +55,32 @@ Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto
 
   The ranges run from a whole drawn game to fighters alone.
 - **On Linux it uses Blender's OpenGL backend,** which drew a frame in 26 ms there against its Vulkan backend's 43. Blender takes the first GPU EGL lists (the NVIDIA GPU on the PC). It runs without a display, over SSH.
-- **If Blender can't draw** (no GPU, no `gpu.init` in an older Blender), `auto` says why and goes on with `librashader-cli`.
-- **Only the vendored presets,** each with its chain in `blender-chain/<shader>/`. `--preset` with any other goes to `librashader-cli`, with `--shader`'s parameters. So does Windows for now: Blender gets the frames through inherited pipes, which `subprocess` passes on macOS and Linux only.
+- **If Blender can't draw** (no GPU, no `gpu.init` in an older Blender), `auto` says why and goes on with `crt-stream`, or `librashader-cli`.
+- **Only the vendored presets,** each with its chain in `blender-chain/<shader>/`. `--preset` with any other goes to `crt-stream` or `librashader-cli`, with `--shader`'s parameters. So does Windows for now: Blender gets the frames through inherited pipes, which `subprocess` passes on macOS and Linux only.
+
+## crt-stream: one librashader chain, without Blender
+
+[`crt-stream/`](crt-stream/) is a small Rust program on the `librashader` 0.12.1 crate: `--runtime stream`, which `auto` tries after Blender and before `librashader-cli`. It keeps one filter chain for the whole video, so state across frames carries over: guest's afterglow, frame counts, history. `librashader-cli` draws every frame as the first of a new chain, so it loses them.
+
+```sh
+crt-stream --preset P.slangp --input 584x480 --output 3504x2880 [--params k=v,...] [--runtime metal|wgpu] [--warmup N]
+```
+
+- **Pipes, as Blender's.** Raw RGBA frames come in on stdin and go out on stdout, top row first. `CRT_READY`, `CRT_FRAMES n` and `CRT_DONE` go to stderr, as `blender_crt.py` writes them. `render_video.py` hands it the decoding ffmpeg's output and the encoding ffmpeg's input as its stdin and stdout, which works on Windows too. If it stops before its first frame, `auto` goes on to `librashader-cli`.
+- **Frame *n* is drawn with frame count *n*,** with librashader's other defaults. `--warmup N` draws the first frame N times first; the video's frames then count on from N.
+- **Runtimes:** Metal on macOS; wgpu on Linux (Vulkan) and Windows (Direct3D 12 or Vulkan). wgpu is in the macOS build too, on Metal (`--runtime wgpu`). wgpu takes the fast GPU (`HighPerformance`, the GTX 1060 on the PC), unlike `librashader-cli`; `WGPU_ADAPTER_NAME` or `WGPU_POWER_PREF` choose another. There's no Vulkan or Direct3D 11 runtime of its own: wgpu covers them.
+- **Two of librashader's runtimes are patched** ([`crt-stream/vendor/`](crt-stream/vendor/README.md)). Metal and wgpu 0.12.1 make a pass's target again on every frame when the next pass reads its mip levels. That erases guest's afterglow, whose pass is followed by a `mipmap_input` pass: without the patch, a white-then-black clip went from 222.4 to 0.0 on its first black frame. Vulkan, Direct3D and OpenGL don't have the bug.
+- **Its frames are `librashader-cli`'s.** Frame 0 of a 584x480 test picture at 3504x2880 is identical to `librashader-cli`'s, every pixel, for all four shaders (their `grille`; Megatron's `grille3`), on the M1 (Metal) and on the GTX 1060 (wgpu, Vulkan). wgpu on the Mac is 0.0004/255 from Metal. The frame's size is the one asked for: the output texture is made at that size and read back whole.
+- **The afterglow decays as measured.** 10 white frames then black, guest's defaults: 222.4, then 35.7, 28.8, 22.6, … and gone after 15 frames, as the crt-royale TouchDesigner project measured it (`temporal_results.json`): the same to 0.001 on the M1, within 0.06 on the GTX 1060.
+- **Speed,** 3504x2880 from 584x480, the next frame drawing while the last is read back. With nothing to encode, 12.4–14.8 ms a frame on the PC's GTX 1060 for the four shaders (68–81 frames a second; Blender on OpenGL 14.4–20.6 ms), and 13–29 ms on the M1 (34–78 frames a second, varying with what else was running; Blender 21–32 ms). Into an encoder, the encoder sets the pace (120 frames of a test picture): 12 frames a second into Apple's ProRes on the M1 (Blender 8.6); 13 into NVENC and 6 into `prores_aw` on the PC, as Blender.
+- **Build:** `install_librashader.py` builds it after `librashader-cli`, from its `Cargo.lock`, into `packages/librashader/bin/`; the build folder is `crt-stream-build` in the cache folder. 1.5 min on the M1, 4 min on the PC. **Found:** `--crt-stream PATH` or `CRT_STREAM`, then `packages/librashader/bin` and the PATH.
+- **Windows** isn't tried yet: `.github/workflows/crt.yml` builds and tests it there when run by hand.
 
 `render_video.py` is the crt-royale TouchDesigner project's `tools/render_video.py`, brought into this repo. It has the same options and works out the same settings (mask, triad size, aspect, output size). On the same input and settings it gave exactly the same pixels on the Mac: physical pixels with and without alpha, and standard mode. What changed:
 
 - **The shaders are here**, in [`slang-shaders/`](slang-shaders/README.md): the files of libretro's slang-shaders (commit `2345ee91`) that the four presets need, unmodified, with their licences. A frame rendered with them is identical to one rendered with the project's full checkout.
 - **guest is the default.** The project's script drew Royale unless told otherwise. Its other profiles came over as `--shader` (above).
-- **The runtime suits the platform.** `--runtime auto` (the default) tries Blender first on macOS and Linux (above). Then it tries this platform's librashader runtimes in order on the first frame, and keeps the first that draws it at the size asked for: Metal on macOS; Direct3D 11, then 12, wgpu, Vulkan, OpenGL on Windows; wgpu, then Vulkan, OpenGL on Linux. The original always asked for Metal.
+- **The runtime suits the platform.** `--runtime auto` (the default) tries Blender first on macOS and Linux, then `crt-stream` (above). Then it tries this platform's librashader runtimes in order on the first frame, and keeps the first that draws it at the size asked for: Metal on macOS; Direct3D 11, then 12, wgpu, Vulkan, OpenGL on Windows; wgpu, then Vulkan, OpenGL on Linux. The original always asked for Metal.
 - **Frames stream through.** One ffmpeg decodes the video, and a second encodes the frames in order as they're drawn. With `librashader-cli` the frames go to it as they come, 4 at a time (`--jobs`), and only the frames in flight are on disk, as BMP files: no PNG compression, which made each frame 0.1 s slower to write and slower again to read back. 150 frames at 3504x2880 with alpha took 30 s instead of 50 on an M1, with identical output.
 - **Alpha follows the picture's framing.** The alpha goes through the same filters as the colour. The original took it from the unframed input, which only mattered in standard mode.
 - **Only Python's standard library.** ffmpeg is found the way slp2alpha finds it.
@@ -103,6 +121,7 @@ Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto
 | Windows | Not yet. `.github/workflows/crt.yml` builds and tests on Windows, Linux and macOS runners when run by hand |
 | The Mac, `--runtime blender` against `librashader-cli`'s Metal | Frames 0.003/255 apart on average, for each mask (3 frames of a real clip). Alpha, which ffmpeg merges in either way, identical. `slp2video --crt` on a 60-frame clip: the same video after ProRes, frame for frame |
 | The Linux PC, `--runtime blender` | `test_crt.py` passes, Blender's render against `librashader-cli`'s included. On real 3504x2880 CRT frames, OpenGL on the GTX 1060 is 0.0002/255 from `librashader-cli`'s wgpu on the same GPU, every mask ([`docs/report-gpu-crt.md`](../../docs/report-gpu-crt.md)) |
+| The Mac and the Linux PC, `--runtime stream` | Frame 0 identical to `librashader-cli`'s (Metal on the Mac, wgpu on the GTX 1060), every shader. guest's afterglow as the TouchDesigner project measured it. `test_crt.py` passes on both, and on Ubuntu 22.04 arm64 in Docker (wgpu on lavapipe) |
 
 ## Linux in Docker
 
@@ -127,7 +146,8 @@ On lavapipe, 10 frames at 3840x2880 took 28 s with 4 at a time on 8 CPU threads:
 | `blender_crt.py` | runs inside Blender: the preset's passes drawn with Blender's `gpu` module, frames through pipes |
 | `blender-chain/` | each vendored preset as `librashader-cli` 0.12.1 compiles it (`royale/`, `guest/`, `guest-ntsc/`, `megatron/`), for `blender_crt.py` |
 | `vendor_chain.py` | writes `blender-chain/` with `librashader-cli` (`write`), or checks it (`check`), for one shader or all |
-| `install_librashader.py` | builds `librashader-cli` for this platform into `packages/librashader/` |
+| `install_librashader.py` | builds `librashader-cli` and `crt-stream` for this platform into `packages/librashader/` |
+| `crt-stream/` | the video through one librashader chain, stdin to stdout (Rust), with two patched librashader runtimes in `vendor/` |
 | `slang-shaders/` | the vendored shaders, `MANIFEST` (each file's git blob id) and their README |
 | `vendor_shaders.py` | copies the shaders from a slang-shaders checkout (`copy DIR`), or checks the copy (`check`) |
 | `test_crt.py` | unit tests: the settings, the runtime order, the encoders, the shader copy and the chain, the BMP frames, and real renders with Blender and with `librashader-cli`, against each other. It runs `test_shaders.py` too |
