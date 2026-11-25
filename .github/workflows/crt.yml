@@ -46,6 +46,8 @@ jobs:
         run: python tools/crt/install_librashader.py
       - name: Check the vendored shaders
         run: python tools/crt/vendor_shaders.py check
+      - name: Check the Blender chains (royale, guest, guest-ntsc, megatron)
+        run: python tools/crt/vendor_chain.py check
       - name: Test, with a real render
         run: python tools/crt/test_crt.py -v
       - name: Upload librashader-cli
