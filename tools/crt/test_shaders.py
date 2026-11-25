@@ -429,5 +429,46 @@ class NtscPhase(unittest.TestCase):
         self.assertEqual((f[0] == f[2], f[1] == f[3], f[0] == f[1]), (True, True, False))
 
 
+class Afterglow(unittest.TestCase):
+    """guest through Blender, which keeps its afterglow: black frames after a bright picture glow, and without the
+    afterglow each frame comes out as a fresh chain's first."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.blender = rv.find_blender() if rv.blender_platform() else None
+        if not cls.blender:
+            raise unittest.SkipTest("no Blender")
+        cls.ffmpeg = locate.find_ffmpeg()
+
+    def rgb(self, path: Path) -> bytes:
+        return subprocess.run([self.ffmpeg, "-v", "error", "-i", str(path), "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+                              capture_output=True, check=True).stdout
+
+    def frames(self, src: Path, out: Path, afterglow: bool) -> list:
+        settings = rv.physical_settings(160, 120, 2, shader="guest", afterglow=afterglow)
+        _, runtime = rv.render(src, out, settings, ffmpeg=self.ffmpeg, librashader=None, blender=self.blender,
+                               runtime="blender", input_size=(160, 120), rate="60", codec="png",
+                               work=out.with_name(out.name + "-work"))
+        self.assertEqual(runtime, "blender")
+        return [self.rgb(p) for p in sorted(out.glob("*.png"))]
+
+    def test_trails_and_without_them(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            clip, black = Path(tmp) / "clip.nut", Path(tmp) / "black.nut"
+            subprocess.run([self.ffmpeg, "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=160x120:r=60", "-f", "lavfi",
+                            "-i", "color=black:s=160x120:r=60", "-filter_complex",
+                            "[0]trim=end_frame=3[a];[1]trim=end_frame=3[b];[a][b]concat=n=2:v=1",
+                            "-c:v", "ffv1", str(clip)], check=True)
+            subprocess.run([self.ffmpeg, "-v", "error", "-f", "lavfi", "-i", "color=black:s=160x120:r=60",
+                            "-frames:v", "1", "-c:v", "ffv1", str(black)], check=True)
+            fresh = self.frames(black, Path(tmp) / "fresh", False)[0]
+            glow = self.frames(clip, Path(tmp) / "glow", True)
+            plain = self.frames(clip, Path(tmp) / "plain", False)
+        self.assertEqual((len(glow), len(plain)), (6, 6))
+        self.assertGreater(sum(glow[3]) - sum(fresh), len(fresh))   # the first black frame glows: over 1/255
+        self.assertGreater(sum(glow[3]), sum(glow[5]))                # and fades
+        self.assertEqual(plain[3:], [fresh] * 3)
+
+
 if __name__ == "__main__":
     unittest.main()

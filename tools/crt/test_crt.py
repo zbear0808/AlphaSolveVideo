@@ -21,7 +21,7 @@ import blender_crt  # noqa: E402   (its GLSL rewrites; without Blender it doesn'
 import render_video as rv  # noqa: E402
 import vendor_shaders  # noqa: E402
 from slp2alpha import locate  # noqa: E402
-from test_shaders import NtscPhase, Profiles, Runtimes as ShaderRuntimes, Settings  # noqa: E402,F401
+from test_shaders import Afterglow, NtscPhase, Profiles, Runtimes as ShaderRuntimes, Settings  # noqa: E402,F401
 
 
 ROYALE = dict(shader="royale")

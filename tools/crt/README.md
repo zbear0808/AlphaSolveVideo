@@ -31,7 +31,11 @@ python3 tools/crt/test_crt.py                                                  #
 
 ### The afterglow
 
-guest's phosphors glow on for a few frames after the beam has gone: a white field turned black falls 222.4 → 35.7, 28.8, 22.6, … and is gone after 15 frames. It only shows below 8/255, on dark trails behind bright things [reported: the TouchDesigner project's `temporal_results.json`]. Blender keeps it from frame to frame. `--no-afterglow` draws guest and guest-ntsc without it: `AS=0`, the afterglow's strength in `pre-shaders-afterglow.slang`. Each frame is then drawn as if it were the first. The other shaders have no afterglow, so it changes nothing there.
+guest's phosphors glow on for a few frames after the beam has gone: a white field turned black falls 222.4 → 35.7, 28.8, 22.6, … and is gone after 15 frames. It only shows below 8/255, on dark trails behind bright things [reported: the TouchDesigner project's `temporal_results.json`].
+
+- **Blender keeps it** from frame to frame. On the Mac, a moving test picture followed by black frames, at 3x physical pixels: the first black frame came out 11.4/255 above a fresh chain's black frame on average (at most 54), two frames later 7.6. guest-ntsc: 10.3 and 7.0. The test picture's own frames, all bright, were identical to a fresh chain's [verified, 25 November].
+- **`--no-afterglow`** draws guest and guest-ntsc without it: `AS=0`, the afterglow's strength in `pre-shaders-afterglow.slang`. Each frame is then drawn as if it were the first: in the same test, every frame was identical to a fresh chain's first frame of the same picture, for both shaders [verified]. The other shaders have no afterglow, so it changes nothing there.
+- **`--warmup N`** (Blender only) draws the first frame N extra times before the video, so the afterglow starts as if the video had been playing. The video then starts at frame count N, so an odd N flips guest-ntsc's phase. Not needed for most videos: the TouchDesigner project found frame 0 already settled, apart from near-black gradients [reported].
 
 ## Blender draws it, on macOS and Linux
 
@@ -40,6 +44,7 @@ Where Blender (5.2) is found, it draws the CRT: `--runtime blender`, which `auto
 - **One process for the whole video.** `blender_crt.py` runs inside Blender, in the background. It compiles the preset once, and draws every frame with Blender's `gpu` module.
   - ffmpeg's decoded frames come in through one pipe and the drawn frames go out to the encoding ffmpeg through another. The frames never pass through Python or the disk.
   - `librashader-cli` instead starts again for every frame, and compiles the preset each time: about 0.5 s a frame on an M1, 1 s of CPU on the Linux PC.
+- **Every shader, the same way.** On a 56-frame clip at 1280x1280, guest, guest-ntsc, Megatron and Royale each took 3–4 s through Blender into ProRes. Their first frames, decoded, were 68–85 dB PSNR from `librashader-cli`'s Metal [verified, 25 November].
 - **The shaders are librashader's.** [`blender-chain/`](blender-chain/README.md) is the vendored preset as `librashader-cli` 0.12.1 compiles it: each pass as GLSL, with its filter, wrap mode, framebuffer format and scaling. `blender_crt.py` sizes and binds the passes as librashader's runtime does.
   - Against `librashader-cli`'s Metal on the same Mac, its frames are 0.003/255 apart on average, for every mask: 0.36% of pixels differ at all. librashader's own runtimes are 0.4–1.0/255 from each other.
   - `vendor_chain.py write` writes `blender-chain/`, and `vendor_chain.py check` checks it.

@@ -77,11 +77,11 @@ The light kept is the picture's mean light against the source's, as the crt-roya
 - **The mask.** `--crt-mask` takes the shader's looks, `grille` (an aperture grille) by default for each. guest has 12, among them `slot`, `shadow`, `grille-soft` and `none`; Megatron `grille`, `slot`, `shadow`, `grille3` and four real monitors (`pvm2730`, `pvm20l4`, `pvm1910`, `mx8000`); Royale `grille`, `slot` and `shadow`. A look the shader hasn't is refused. `python3 tools/crt/render_video.py --list-masks` lists them all. At slp2video's 3 px triads:
   - guest's grille is its R | G | B grille, 3 px, at mask strength 0.5 (`shadowMask 6`, `masksize 1`, no zoom). Its scanlines follow the picture's rows by themselves;
   - Megatron's patterns are fixed, per output pixel, so the 3 px pitch picks the nearest of each look's screen type. Its `grille` (4 px R G B X) becomes the 3 px R G B grille, `grille3`'s, and so do the monitors with a grille; the shadow mask stays 6 px dots.
-- **The afterglow.** Blender keeps guest's afterglow from frame to frame. `--crt-no-afterglow` draws guest without it (the other shaders have none). Without Blender, `librashader-cli` draws each frame on its own: guest loses its afterglow (slp2video says so), which only shows below 8/255.
+- **The afterglow.** Blender keeps guest's afterglow from frame to frame: on black frames after a bright picture, 11.4/255 on average on the first, 7.6 two frames later. `--crt-no-afterglow` draws guest without it: each frame then comes out exactly as a fresh chain's first (the other shaders have none) [measured on the Mac]. `--crt-warmup N` draws the first frame N extra times first, so the afterglow starts as if the clip had been playing; an odd N flips guest-ntsc's phase. Without Blender, `librashader-cli` draws each frame on its own: guest loses its afterglow (slp2video says so).
 - **More parameters.** `--crt-triads-per-pixel` and `--crt-params` (more of the shader's own parameters, e.g. `maskstr=0.4` for guest, `halation_weight=0.1` for Royale) go to the renderer.
 - **The file name** says `crt` for guest's grille, and otherwise the shader and the look: `crt guest slot`, `crt royale`, `crt megatron grille3`, `crt no afterglow`.
 - **Transparency** survives: the renderer keeps the alpha. The model and the background colour are composited before the CRT, so they're on the tube too. guest's afterglow is then cut off by that alpha, so it only shows where the picture is opaque (`--keep-background`, a model, or a background colour).
-- **Speed and disk.** Where Blender is found (macOS, Linux), Blender's GPU module draws the CRT in one process for the whole video, and the encoder sets the pace ([`report-gpu-crt.md`](report-gpu-crt.md)). These numbers are CRT Royale's.
+- **Speed and disk.** Where Blender is found (macOS, Linux), Blender's GPU module draws the CRT in one process for the whole video, and the encoder sets the pace ([`report-gpu-crt.md`](report-gpu-crt.md)). These numbers are CRT Royale's; guest takes about as long (below).
   - **On an M1,** 3504x2880 frames go into Apple's ProRes at 19 a second when the fighters are alone, and 4 when every pixel is drawn. That's about 4 times `librashader-cli`'s speed. `--format mp4` is slower there (1.2–5.6 a second), because `libx264` encodes it.
   - **On a Linux PC with a GTX 1060,** they go 6–8 a second into `prores_aw` and 12–13 into NVENC: 3–6 times `librashader-cli`'s speed.
   - **A 3-minute game's CRT** takes 14–31 minutes on the PC, and 10–45 on the M1, depending on the picture and the format.
@@ -118,9 +118,12 @@ For a 4 s clip (240 frames) with the logo through the moving camera and the CRT,
 | Model, fixed camera | 2 to 3 s, once per stage, finish and size | — |
 | Model, moving camera (2 Blender processes, 16 samples, the logo without shadows) | 18 s | 17 s |
 | Composite | 1 s | 2 s |
+| CRT (guest), Blender's GPU module | 18–27 s (ProRes) | — |
 | CRT (Royale), Blender's GPU module | 13–17 s (ProRes) | 27–28 s (ProRes), 16–17 s (`.mp4`, NVENC) |
 | CRT (Royale), `librashader-cli` | 58 s | 119 s |
-| All of it | 41 s | 60 s (`.mp4`: 49 s) |
+| All of it | 41 s (guest: 44–54 s) | 60 s (`.mp4`: 49 s) |
+
+guest's numbers are from 25 November: the same clip three times each with guest and with `--crt-shader royale`, one after the other (`research/crt-in-blender/e2e.sh`). The CRT took 18, 27 and 27 s with guest, 19, 26 and 26 s with Royale, so the two cost about the same. Royale was slower than the 13–17 s measured before, with other work running on the Mac, so compare guest with these Royale runs rather than with the row above.
 
 ## Files
 

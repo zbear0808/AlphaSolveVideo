@@ -395,7 +395,7 @@ def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, 
                             rate=rate, prefilter=f"{crt.frame_clock(rate)},{squeeze}", alpha=plan.transparent,
                             codec="h264-444" if args.format == "mp4" else "prores4444", runtime=args.crt_runtime,
                             jobs=args.crt_jobs, total=info["frames"], on_progress=Progress("CRT"),
-                            work=work / "crt", blender=blender)
+                            work=work / "crt", blender=blender, warmup=args.crt_warmup or 0)
     how = "by Blender's GPU module" if runtime == "blender" else f"with librashader's {runtime} runtime"
     print(f"CRT: drawn {how} in {time.monotonic() - t0:.0f} s")
     got = video_info(ffprobe, out)["frames"]
@@ -485,6 +485,9 @@ def parse(argv: Sequence[str]):
     g.add_argument("--crt-no-afterglow", action="store_true",
                    help="guest and guest-ntsc without their afterglow: each frame as if it were the first (the "
                         "other shaders have none)")
+    g.add_argument("--crt-warmup", type=positive, metavar="N",
+                   help="draw the first frame N extra times first, so guest's afterglow starts as if the clip had "
+                        "been playing (Blender only; an odd N flips guest-ntsc's phase)")
     g.add_argument("--crt-jobs", type=positive, default=4, metavar="N",
                    help="frames librashader-cli renders at once (default 4; Blender draws one video in one process)")
     g.add_argument("--crt-runtime", choices=crt.RUNTIMES, default="auto",

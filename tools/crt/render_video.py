@@ -838,7 +838,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                                      "(default: --shader's, in slang-shaders/)")
     ap.add_argument("--ffmpeg", help="ffmpeg (ffprobe is expected next to it)")
     ap.add_argument("--warmup", type=int, default=0, metavar="N",
-                    help="draw the first frame N extra times first, so guest's afterglow starts settled (Blender only)")
+                    help="draw the first frame N extra times first, so guest's afterglow starts settled (Blender "
+                         "only). The video then starts at frame count N: an odd N flips guest-ntsc's phase")
     ap.add_argument("--keep", action="store_true", help="keep the work folder")
     a = ap.parse_args(argv)
     if a.list_masks:
