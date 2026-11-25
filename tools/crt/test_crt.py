@@ -17,6 +17,7 @@ from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+import blender_crt  # noqa: E402   (its GLSL rewrites; without Blender it doesn't draw)
 import render_video as rv  # noqa: E402
 import vendor_shaders  # noqa: E402
 from slp2alpha import locate  # noqa: E402
@@ -374,6 +375,61 @@ class Chain(unittest.TestCase):
         self.assertEqual(looks["pvm2730"]["hcrt_red_vertical_convergence"], -0.14)
         self.assertEqual(looks["pvm1910"]["hcrt_crt_resolution"], 0.0)   # 300 TVL
         self.assertNotIn("looks", self._chain("guest"))
+
+
+class Rewrites(unittest.TestCase):
+    """blender_crt.split()'s GLSL rewrites for Blender's GPU module, on snippets and on the chains."""
+
+    def test_brackets(self):
+        self.assertEqual(blender_crt.closing("a[b[1]](c) d", 1), 7)
+        self.assertEqual(blender_crt.arguments("f(a, b), c[1, 2], 3"), ["f(a, b)", "c[1, 2]", "3"])
+        self.assertEqual(blender_crt.leaves("uint[][](uint[](1u, 2u), uint[](3u, f(4u, 5u)))"),
+                         ["1u", "2u", "3u", "f(4u, 5u)"])
+
+    def test_constant_arrays_of_arrays_become_flat(self):
+        src = ("const uint t[2][3] = uint[][](uint[](1u, 2u, 3u), uint[](4u, 5u, 6u));\n"
+               "const uint u[2][2][2] = uint[][][](uint[][](uint[](1u, 2u), uint[](3u, 4u)), "
+               "uint[][](uint[](5u, 6u), uint[](7u, 8u)));\n"
+               "uint f(uint a, int b[2]) { return t[a + uint(b[1])][f(a, b)] + u[a][t[0][1]] [2u]; }\n")
+        self.assertEqual(blender_crt.flatten_nested_arrays(src),
+                         "const uint t[6] = uint[](1u, 2u, 3u, 4u, 5u, 6u);\n"
+                         "const uint u[8] = uint[](1u, 2u, 3u, 4u, 5u, 6u, 7u, 8u);\n"
+                         "uint f(uint a, int b[2]) { return t[(int(a + uint(b[1]))) * 3 + int(f(a, b))] + "
+                         "u[((int(a)) * 2 + int(t[(int(0)) * 3 + int(1)])) * 2 + int(2u)]; }\n")
+        with self.assertRaises(ValueError):   # a whole row can't be indexed into a flat array
+            blender_crt.flatten_nested_arrays("const uint t[2][2] = uint[][](uint[](1u, 2u), uint[](3u, 4u));\n"
+                                              "uint g() { return t[1]; }")
+
+    def test_local_arrays_are_assigned_element_by_element(self):
+        src = "void main()\n{\n    float a[3] = float[](0.5, f(1.0, 2.0), -3.0);\n    a = b;\n}\n"
+        self.assertEqual(blender_crt.unroll_local_arrays(src),
+                         "void main()\n{\n    float a[3]; a[0] = 0.5; a[1] = f(1.0, 2.0); a[2] = -3.0;\n    a = b;\n}\n")
+        self.assertEqual(blender_crt.unroll_local_arrays("const float k[2] = float[](1.0, 2.0);\n"),
+                         "const float k[2] = float[](1.0, 2.0);\n")   # constants stay as they are
+
+    def test_whole_arrays_are_copied_element_by_element(self):
+        src = "const float k[3] = float[](1.0, 2.0, 3.0);\nvoid main()\n{\n    float a[3];\n    a = k;\n    x = y;\n}"
+        self.assertIn("    for (int _k = 0; _k < 3; _k++) { a[_k] = k[_k]; }\n    x = y;",
+                      blender_crt.copy_arrays(src))
+
+    def stages(self, shader):
+        folder = rv.HERE / "blender-chain" / shader
+        return {p.name: p.read_text(encoding="utf-8") for p in sorted(folder.glob("p*.glsl"))}
+
+    def test_royale_is_drawn_from_the_same_source_as_before(self):
+        for name, src in self.stages("royale").items():
+            body = blender_crt.split(src)[-1]
+            for rewrite in (blender_crt.flatten_nested_arrays, blender_crt.unroll_local_arrays,
+                            blender_crt.copy_arrays):
+                self.assertEqual(rewrite(body), body, f"{name}: {rewrite.__name__}")
+
+    def test_what_blender_cant_compile_is_gone(self):
+        for shader in ("guest", "guest-ntsc", "megatron"):
+            for name, src in self.stages(shader).items():
+                body = blender_crt.split(src)[-1]
+                self.assertNotRegex(body, r"\]\s*\[|#extension|^\s+\w+ \w+\[\d+\] = \w+\[\]\(", f"{shader} {name}")
+        p6 = blender_crt.split(self.stages("guest-ntsc")["p6.fragment.glsl"])[-1]
+        self.assertIn("for (int _k = 0; _k < 33; _k++) { luma_filter_3_phase[_k] = _262[_k]; }", p6)
 
 
 class BlenderRender(unittest.TestCase):
