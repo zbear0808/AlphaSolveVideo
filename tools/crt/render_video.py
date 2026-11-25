@@ -81,7 +81,7 @@ RUNTIME_ORDER = {
 # through inherited pipes. Only for the vendored preset, which blender-chain/ is compiled from.
 BLENDER_PLATFORMS = ("darwin", "linux")
 BLENDER_SCRIPT = HERE / "blender_crt.py"
-BLENDER_CHAIN = HERE / "blender-chain"
+BLENDER_CHAIN = HERE / "blender-chain" / "royale"
 RUNTIMES = ("auto", "blender", "metal", "d3d11", "d3d12", "d3d9", "vulkan", "wgpu", "opengl4", "opengl3")
 
 

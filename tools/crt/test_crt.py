@@ -336,7 +336,7 @@ def png_rgb(ffmpeg: str, path: Path) -> bytes:
 
 
 class Chain(unittest.TestCase):
-    """blender-chain/ is what librashader-cli compiles from the vendored preset."""
+    """blender-chain/<shader>/ is what librashader-cli compiles from each vendored preset."""
 
     def test_the_copy_is_what_librashader_writes(self):
         try:
@@ -346,15 +346,34 @@ class Chain(unittest.TestCase):
         import vendor_chain
         self.assertEqual(vendor_chain.check(cli), [])
 
+    def _chain(self, shader: str) -> dict:
+        return json.loads((rv.HERE / "blender-chain" / shader / "chain.json").read_text(encoding="utf-8"))
+
     def test_the_copy_is_complete(self):
-        doc = json.loads((rv.BLENDER_CHAIN / "chain.json").read_text(encoding="utf-8"))
-        self.assertEqual(doc["shaders_commit"], rv.SHADERS_COMMIT)
-        self.assertEqual((rv.HERE / doc["preset"]).resolve(), rv.PRESET.resolve())
-        for p in doc["passes"]:
-            for stage in ("vertex", "fragment"):
-                self.assertTrue((rv.BLENDER_CHAIN / f"p{p['id']}.{stage}.glsl").is_file())
-        for lut in doc["luts"]:
-            self.assertTrue((rv.PRESET.parent / lut["path"]).is_file(), lut["path"])
+        self.assertEqual(rv.BLENDER_CHAIN, rv.HERE / "blender-chain" / "royale")
+        for shader, preset in vendor_shaders.PRESETS.items():
+            with self.subTest(shader):
+                doc, folder = self._chain(shader), rv.HERE / "blender-chain" / shader
+                self.assertEqual(doc["shaders_commit"], rv.SHADERS_COMMIT)
+                self.assertEqual((rv.HERE / doc["preset"]).resolve(), (vendor_shaders.VENDORED / preset).resolve())
+                for p in doc["passes"]:
+                    for stage in ("vertex", "fragment"):
+                        self.assertTrue((folder / f"p{p['id']}.{stage}.glsl").is_file())
+                for lut in doc["luts"]:
+                    self.assertTrue(((rv.HERE / doc["preset"]).parent / lut["path"]).is_file(), lut["path"])
+        self.assertEqual((rv.HERE / self._chain("royale")["preset"]).resolve(), rv.PRESET.resolve())
+
+    def test_feedback_passes(self):
+        for shader, ids in (("royale", []), ("guest", [2, 4]), ("guest-ntsc", [2, 10]), ("megatron", [])):
+            self.assertEqual([p["id"] for p in self._chain(shader)["passes"] if p.get("feedback")], ids, shader)
+
+    def test_megatron_looks(self):
+        looks = self._chain("megatron")["looks"]
+        self.assertEqual(list(looks), list(vendor_shaders.MEGATRON_DISPLAYS))
+        self.assertEqual(looks["mx8000"]["hcrt_crt_screen_type"], 2.0)   # a slot mask
+        self.assertEqual(looks["pvm2730"]["hcrt_red_vertical_convergence"], -0.14)
+        self.assertEqual(looks["pvm1910"]["hcrt_crt_resolution"], 0.0)   # 300 TVL
+        self.assertNotIn("looks", self._chain("guest"))
 
 
 class BlenderRender(unittest.TestCase):

@@ -25,9 +25,12 @@ HERE = Path(__file__).resolve().parent
 VENDORED = HERE / "slang-shaders"
 PRESETS = {"royale": "crt/crt-royale.slangp", "guest": "crt/crt-guest-advanced.slangp",
            "guest-ntsc": "crt/crt-guest-advanced-ntsc.slangp", "megatron": "hdr/crt-sony-megatron-v2-default.slangp"}
-MEGATRON_DISPLAYS = ("sony-pvm-2730", "sony-pvm-20L4", "sony-pvm-1910", "bang-olufsen-mx8000")
+# Megatron's display presets, by the names of their looks (chain.json's "looks")
+MEGATRON_DISPLAYS = {"pvm2730": "sony-pvm-2730", "pvm20l4": "sony-pvm-20L4", "pvm1910": "sony-pvm-1910",
+                     "mx8000": "bang-olufsen-mx8000"}
 # vendored with the presets: Megatron's display presets and its SDR preset (they #reference the default one)
-MORE_PRESETS = tuple(f"hdr/sony_megatron_v2_presets/crt-sony-megatron-v2-{d}.slangp" for d in MEGATRON_DISPLAYS) + (
+MEGATRON_DISPLAY_PRESET = "hdr/sony_megatron_v2_presets/crt-sony-megatron-v2-{}.slangp"
+MORE_PRESETS = tuple(MEGATRON_DISPLAY_PRESET.format(d) for d in MEGATRON_DISPLAYS.values()) + (
     "hdr/crt-sony-megatron-v2-default-sdr.slangp",)
 COMMIT = "2345ee91602a7404d3a1a6a5df6108d7305fdad4"
 EXTRAS = ("crt/shaders/crt-royale/LICENSE.TXT", "crt/shaders/crt-royale/README.TXT",

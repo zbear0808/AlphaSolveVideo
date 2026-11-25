@@ -91,8 +91,8 @@ On lavapipe, 10 frames at 3840x2880 took 28 s with 4 at a time on 8 CPU threads:
 |---|---|
 | `render_video.py` | the renderer: the command, and the functions `slp2video` calls |
 | `blender_crt.py` | runs inside Blender: the preset's passes drawn with Blender's `gpu` module, frames through pipes |
-| `blender-chain/` | the preset as `librashader-cli` 0.12.1 compiles it, for `blender_crt.py` |
-| `vendor_chain.py` | writes `blender-chain/` with `librashader-cli` (`write`), or checks it (`check`) |
+| `blender-chain/` | each vendored preset as `librashader-cli` 0.12.1 compiles it (`royale/`, `guest/`, `guest-ntsc/`, `megatron/`), for `blender_crt.py` |
+| `vendor_chain.py` | writes `blender-chain/` with `librashader-cli` (`write`), or checks it (`check`), for one shader or all |
 | `install_librashader.py` | builds `librashader-cli` for this platform into `packages/librashader/` |
 | `slang-shaders/` | the vendored shaders, `MANIFEST` (each file's git blob id) and their README |
 | `vendor_shaders.py` | copies the shaders from a slang-shaders checkout (`copy DIR`), or checks the copy (`check`) |
