@@ -414,6 +414,14 @@ class Rewrites(unittest.TestCase):
         self.assertIn("    for (int _k = 0; _k < 3; _k++) { a[_k] = k[_k]; }\n    x = y;",
                       blender_crt.copy_arrays(src))
 
+    def test_constant_arrays_become_functions(self):
+        src = ("const float k[3] = float[](1.0, f(2.0, 3.0), 4.0);\nconst float w[2] = float[](1.0, 2.0);\n"
+               "void main() { x = k[k[u + 1u]] + w[0]; g(w); }")
+        self.assertEqual(blender_crt.constant_tables(src),
+                         "float k(int i) { switch (i) { case 0: return 1.0; case 1: return f(2.0, 3.0); "
+                         "default: return 4.0; } }\nconst float w[2] = float[](1.0, 2.0);\n"
+                         "void main() { x = k(int(k(int(u + 1u)))) + w[0]; g(w); }")   # w is used as a whole
+
     def stages(self, shader):
         folder = rv.HERE / "blender-chain" / shader
         return {p.name: p.read_text(encoding="utf-8") for p in sorted(folder.glob("p*.glsl"))}
@@ -422,7 +430,7 @@ class Rewrites(unittest.TestCase):
         for name, src in self.stages("royale").items():
             body = blender_crt.split(src)[-1]
             for rewrite in (blender_crt.flatten_nested_arrays, blender_crt.unroll_local_arrays,
-                            blender_crt.copy_arrays):
+                            blender_crt.copy_arrays, blender_crt.constant_tables):
                 self.assertEqual(rewrite(body), body, f"{name}: {rewrite.__name__}")
 
     def test_what_blender_cant_compile_is_gone(self):
@@ -431,7 +439,8 @@ class Rewrites(unittest.TestCase):
                 body = blender_crt.split(src)[-1]
                 self.assertNotRegex(body, r"\]\s*\[|#extension|^\s+\w+ \w+\[\d+\] = \w+\[\]\(", f"{shader} {name}")
         p6 = blender_crt.split(self.stages("guest-ntsc")["p6.fragment.glsl"])[-1]
-        self.assertIn("for (int _k = 0; _k < 33; _k++) { luma_filter_3_phase[_k] = _262[_k]; }", p6)
+        self.assertIn("for (int _k = 0; _k < 33; _k++) { luma_filter_3_phase[_k] = _262(int(_k)); }", p6)
+        self.assertNotRegex(p6, r"(?m)^const ", "every constant table is a function")
 
 
 class BlenderRender(unittest.TestCase):

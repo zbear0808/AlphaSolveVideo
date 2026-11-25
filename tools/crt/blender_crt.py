@@ -33,14 +33,17 @@ split() rewrites what Blender's GLSL-to-Metal translation can't compile, the sam
   - a local array initialised by a constructor (`float a[33] = float[](...);`, ntsc-pass2) as its declaration and one
     assignment per element. Making it const doesn't work: the pass assigns to it later;
   - constant arrays of arrays (Megatron's mask tables, `const uint t[3][4][3] = uint[][][](...)`) as flat arrays,
-    each use `t[a][b][c]` as `t[((int(a)) * 4 + int(b)) * 3 + int(c)]`, and without the #extension line.
+    each use `t[a][b][c]` as `t[((int(a)) * 4 + int(b)) * 3 + int(c)]`, and without the #extension line;
+  - each constant array (`const float k[15] = float[](...)`) as a function with a switch, each `k[i]` as
+    `k(int(i))`. This one is for speed: Blender's Metal backend makes the shader's global constants members of a
+    class that every pixel builds, and Megatron's last pass took 280 ms a 3504x2880 frame on the Mac instead of 32.
 crt-royale's source comes out of them as before, so its frames are byte for byte the same.
 Not done: mip levels (Blender's Python can't build them; librashader builds them for a pass whose next pass has
 mipmap_input). crt-royale reads them only from its large mask textures (mask_sample_mode 1, not the default) and for
 its last pass's input, which it samples at full size here. guest reads them only in avg-lum.slang's textureLod, for
 the average luminance in the alpha channel, which only moves the picture through raster bloom (BLOOM, 0 by default).
 Against librashader-cli on the same Mac (Metal) frames are 0.003/255 apart on average for crt-royale, and within
-0.02/255 for guest, guest-ntsc and Megatron, on every look tried.
+0.001/255 for guest, guest-ntsc and Megatron, on every look tried.
 """
 import json
 import math
@@ -192,6 +195,47 @@ def copy_arrays(body):
     return re.sub(r"^([ \t]+)(\w+) = (\w+);$", loop, body, flags=re.M)
 
 
+CONSTANT_ARRAY = re.compile(r"^const (\w+) (\w+)\[(\d+)\] = \1\[\]\(", re.M)
+
+
+def calls(text, names):
+    """Each `a[i]` of an array in `names` as `a(int(i))`."""
+    if not names:
+        return text
+    use, out, pos = re.compile(r"\b(%s)\s*\[" % "|".join(map(re.escape, names))), [], 0
+    while True:
+        m = use.search(text, pos)
+        if not m:
+            return "".join(out) + text[pos:]
+        end = closing(text, m.end() - 1)
+        out.append(f"{text[pos:m.start()]}{m.group(1)}(int({calls(text[m.end():end - 1], names)}))")
+        pos = end
+
+
+def constant_tables(body):
+    """`const T a[N] = T[](x0, ...);` as a function `T a(int i)` with a switch, each `a[i]` as `a(int(i))`."""
+    tables = []
+    for m in CONSTANT_ARRAY.finditer(body):
+        end = closing(body, m.end() - 1)
+        items = arguments(body[m.end():end - 1])
+        if body[end] != ";" or len(items) != int(m.group(3)):
+            raise ValueError(f"can't read {m.group(2)}: {len(items)} elements for {m.group(3)}")
+        tables.append((m.start(), end + 1, m.group(1), m.group(2), items))
+    rest = "".join(body[s:e] for s, e in zip([0] + [t[1] for t in tables], [t[0] for t in tables] + [len(body)]))
+    # an array used as a whole somewhere stays as it is
+    names = [t[3] for t in tables if re.findall(rf"\b{t[3]}\b\s*(.?)", rest).count("[") ==
+             len(re.findall(rf"\b{t[3]}\b", rest))]
+    out, pos = [], 0
+    for start, end, t, name, items in tables:
+        if name in names:
+            cases = " ".join(f"case {k}: return {x};" for k, x in enumerate(items[:-1]))
+            out.append(f"{body[pos:start]}{t} {name}(int i) {{ switch (i) {{ {cases} default: return {items[-1]}; }} }}")
+        else:
+            out.append(body[pos:end])
+        pos = end
+    return calls("".join(out) + body[pos:], names)
+
+
 def split(src):
     """One transpiled stage: its uniform block, push constants, samplers, inputs, outputs, and the rest."""
     ubo = re.search(r"layout\(std140\) uniform \w+\s*\{(.*?)\}\s*(\w+);", src, re.S)
@@ -210,7 +254,7 @@ def split(src):
     # Blender's GLSL-to-Metal translation can't copy a whole array (`vec3 a[9] = b;`, in crt-royale's last pass)
     body = re.sub(r"(\w+) (\w+)\[(\d+)\] = (\w+);", r"\1 \2[\3]; for (int _k = 0; _k < \3; _k++) { \2[_k] = \4[_k]; }",
                   body)
-    body = copy_arrays(unroll_local_arrays(body))
+    body = constant_tables(copy_arrays(unroll_local_arrays(body)))
     for old, new in ((ubo and ubo.group(2), "ubo"), (push and push.group(3), "push")):
         if old:
             body = re.sub(rf"\b{old}\b", new, body)
