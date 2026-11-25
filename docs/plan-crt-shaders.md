@@ -134,7 +134,19 @@ The GLSL files stay exactly as `librashader-cli` writes them, so `vendor_chain.p
 2. **Constant arrays of arrays** (Megatron pass 1): `const uint _658[3][4][3] = uint[][][](...)` becomes a flat `const uint _658[36] = uint[](...)`. Each index `_658[a][b][c]` becomes `_658[((a) * 4 + (b)) * 3 + (c)]`, and the `#extension GL_ARB_arrays_of_arrays` line goes. This needs a small bracket-matching parser rather than one regex, because the indices are expressions [to test: also on Linux OpenGL, where Blender adds its own `#version`].
 3. Anything else the Linux OpenGL and Vulkan backends turn up [to test: on the PC].
 
+[verified 25 November, Blender 5.2.3]: with rewrites 1 and 2 (and `a = b;` between whole arrays, also in ntsc-pass2, as a loop), all 45 passes of the four presets compile on Metal (the Mac) and on OpenGL (the PC). Linux OpenGL needed nothing more. One more rewrite is for speed: Blender's Metal backend turns the shader's global constant arrays into members of a class that every pixel builds, so Megatron's last pass took 280 ms a 3504×2880 frame. Each constant array is now a function with a `switch` (`k[i]` becomes `k(int(i))`): 32 ms. crt-royale has no such arrays, so its source is unchanged.
+
 The quality bar is the one the Royale chain met. Blender's frames should be within 1/255 of `librashader-cli`'s on the same machine, and the goal is the same 0.003/255 [verified for Royale: `report-gpu-crt.md`].
+
+[verified 25 November] Frame 0, Blender against `librashader-cli` on the same machine: 3 real pictures (the crt-royale project's movie, test card and jellybeans, scaled to 584×480) drawn at 3504×2880 with the crt-royale project's `params_ex` for slp2video's geometry (triad 3 px). Mean difference per channel, /255; the largest single difference in brackets:
+
+| Preset, look | Mac (Metal against metal) | PC (OpenGL against wgpu) |
+|---|---|---|
+| guest grille, slot, shadow | 0.00001–0.00003 (1) | 0.036–0.050 (11) |
+| guest-ntsc grille | 0.0001–0.0003 (2) | 0.058–0.082 (11) |
+| Megatron grille (= grille3 at 3 px), slot, shadow, pvm2730, 4 px grille | 0.000000–0.000005 (1) | 0.002–0.011 (5) |
+
+All within the 1/255 bar. On the PC, guest's difference is one pass, `bloom_horizontal`: it samples the source row at `floor(480 × v)`, and every fifth of its 600 rows lands exactly on a row boundary, where the two drivers round the other way. Blender's OpenGL and Vulkan backends agree with each other (0.0001), and the quad's vertex order, a single triangle and `noperspective` change nothing. The Mac's Blender frame is 0.010/255 from the PC's `wgpu` one. crt-royale's frames, through `main`'s `blender_crt.py` and this one, are byte for byte the same on both machines (3 masks, 5 frames each).
 
 ### 4.4 State across frames in `blender_crt.py`
 
@@ -146,6 +158,21 @@ These follow librashader 0.12.1's runtime (`filter_chain/chain.rs`, `binding.rs`
 - **Float targets:** guest's passes 5–10 and Megatron's pass 0 are `R16G16B16A16Sfloat`. `FORMATS` already maps that to `RGBA16F`, and these passes use it. The last pass stays 8-bit for SDR.
 - **Mip levels:** none, as now and as in `librashader-cli`. Step C4 first checks that guest's average luminance only reaches the picture through raster bloom (`textureLod` in `avg-lum.slang`), and that bloom is off in our looks. If either is wrong, `blender_crt.py` builds the levels itself. The TouchDesigner project did that with 9 half-size passes, each a single 1/256-weighted bilinear sample at the texel centre, which matched Metal's `generateMipmaps` for this pass [reported: `pipelines/guest_advanced/td-plan.md` 4]. It also needs `textureLod(Source, uv, lod)` rewritten to sample those levels [estimate: +1 day].
 - **`--warmup N`:** draw the first frame N extra times before the video, so the afterglow and luminance start settled. This is optional: the TouchDesigner project found frame 0 already in steady state, apart from near-black gradients [reported].
+
+[verified 25 November] as built (`blender_crt.py`, following librashader 0.12.1's `binding.rs` and Metal `filter_chain.rs`):
+
+- **Feedback:** two targets per feedback pass (guest's 2 and 4, guest-ntsc's 2 and 10), swapped before each frame as librashader does, cleared to zero first. `OriginalHistory0` is bound to the Original. The host's values are `librashader-cli`'s defaults: FrameDirection 1, OriginalFPS 1, FrameTimeDelta 0, HDRMode 0, BrightnessNits 200. A scalar no parameter declares (guest's `LUTLOW`, shadowed by a `#define`) is 0, as librashader binds it. `--warmup N` draws frame 0 as frames 0 to N − 1 first, then the video from frame count N, as the crt-royale project's `lrs-seq` does.
+- **Afterglow:** the white-then-black step (288×288 at 1280×1280, guest's defaults, mean inside a 48 px margin) gives 222.4 → 35.7, 28.8, 22.6, 18.3, 14.8, 12.1, 9.5, 6.9, … and under 1 after 15 frames, on both machines. The largest difference from `temporal_results.json` is 0.0005 levels on the Mac and 0.06 on the PC.
+- **guest-ntsc's phase:** on a still 584×480 card, frames 1 and 3 differ from frame 0 by 10.1/255 on average, frame 2 by 0.014.
+- **Mip levels aren't needed for our looks.** `librashader` does build them (Metal `filter_chain.rs` calls `generate_mipmaps` on the output of a pass whose next pass has `mipmap_input`: guest's passes 2 and 3). Only `avg-lum.slang` reads them (`textureLod`, lines 93–96), into the alpha channel of `AvgLumPass` (line 113). That alpha is read only as `lum` (`crt-guest-advanced.slang` 295, `deconvergence.slang` 679), and `lum` only in `factor = 1.00 + (1.0-0.5*OS)*BLOOM/100.0 - lum*BLOOM/100.0` (lines 329 and 699; the NTSC versions alike). That's raster bloom, `BLOOM`, 0 by default (`crt-guest-advanced.slang` 181), and neither `video.py`'s `LOOK` nor its `MASKS` sets it (its `bloom` is another parameter, the bloom strength). With `BLOOM` 0 the factor is 1 whatever `lum` is. The frame-0 numbers above agree.
+- **librashader-cli `-f N` isn't a reference for later frames on the Mac:** Blender's frames 1 and 3 of a still card are 0.03 and 0.07/255 from `librashader-cli -f 1` and `-f 3` with guest (0.012 with guest-ntsc), while its decay matches `lrs-seq`'s. That fits the crt-royale project's finding that the unpatched Metal runtime loses a mip-mapped pass's history [reported].
+
+Per frame at 3504×2880 from 584×480, drawn and read back, no encoder (median of 20 frames; the Mac's vary from run to run) [verified 25 November]:
+
+| | Royale | guest | guest-ntsc | Megatron |
+|---|---|---|---|---|
+| Mac (M1, Metal; medians of 3 runs) | 21–29 ms | 25–29 ms | 25–31 ms | 23–32 ms |
+| PC (GTX 1060, OpenGL) | 18.5 ms | 20.6 ms | 19.4 ms | 14.4 ms |
 
 ### 4.5 The `librashader-cli` fallback (Windows, and no Blender)
 
