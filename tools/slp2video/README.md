@@ -7,11 +7,12 @@ python3 tools/slp2video/slp2video.py game.slp                                   
 python3 tools/slp2video/slp2video.py game.slp --keep-background --crt             # the game as it looks, on a CRT
 python3 tools/slp2video/slp2video.py game.slp --model statue.glb --animelee       # Animelee fighters on your model
 python3 tools/slp2video/slp2video.py game.slp --model logo --static-camera --crt  # the logo stage on a CRT
+python3 tools/slp2video/slp2video.py game.slp --keep-background --crt --crt-shader royale   # the CRT before 25 November
 python3 tools/slp2video/slp2video.py ys.slp --shy-guy-sprite mascot.png --format mp4
 python3 tools/slp2video/slp2video.py --help                                       # every option
 ```
 
-Needs what `slp2alpha render` needs (the headless Dolphin build, a Melee ISO, ffmpeg); Blender for `--model`; for `--crt`, Blender (macOS and Linux) or `librashader-cli` 0.12.1 (`python3 tools/crt/install_librashader.py` builds it). The CRT renderer and its shaders are in [`tools/crt`](../crt/README.md).
+Needs what `slp2alpha render` needs (the headless Dolphin build, a Melee ISO, ffmpeg); Blender for `--model`; for `--crt`, Blender (macOS and Linux) or `librashader-cli` 0.12.1 (`python3 tools/crt/install_librashader.py` builds it). The CRT renderer and its shaders are in [`tools/crt`](../crt/README.md): crt-guest-advanced by default, or `--crt-shader guest-ntsc`, `megatron` or `royale`, each with its own looks (`--crt-mask`).
 
 | File | |
 |---|---|

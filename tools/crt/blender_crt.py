@@ -1,30 +1,52 @@
-"""CRT Royale drawn by Blender's GPU module: librashader's filter chain rebuilt on `gpu.types`, for a whole video in
-one process. Runs inside Blender, in the background; render_video.py --runtime blender starts it:
+"""A CRT shader preset drawn by Blender's GPU module: librashader's filter chain rebuilt on `gpu.types`, for a whole
+video in one process. Runs inside Blender, in the background; render_video.py --runtime blender starts it:
 
     blender -b --factory-startup -noaudio [--gpu-backend opengl] --python-exit-code 1 --python blender_crt.py -- \
-        CHAIN LUTS IN_FD OUT_FD W H OUT_W OUT_H PARAMS
+        CHAIN LUTS IN_FD OUT_FD W H OUT_W OUT_H PARAMS [--warmup N]
 
-CHAIN is blender-chain/ (vendor_chain.py): each pass's GLSL as librashader-cli compiles it, and chain.json. LUTS is a
-folder with the mask textures as raw RGBA and luts.json ({name: [width, height]}). IN_FD and OUT_FD are inherited
-file descriptors: raw RGBA frames of W x H come in, raw RGBA frames of OUT_W x OUT_H go out, top row first both
-ways, as ffmpeg's rawvideo has them. PARAMS are the shader's parameters (mask_type=0,mask_triad_size_desired=3,...).
+CHAIN is one of blender-chain/<shader>/ (vendor_chain.py): each pass's GLSL as librashader-cli compiles it, and
+chain.json. LUTS is a folder with the mask textures as raw RGBA and luts.json ({name: [width, height]}). IN_FD and
+OUT_FD are inherited file descriptors: raw RGBA frames of W x H come in, raw RGBA frames of OUT_W x OUT_H go out, top
+row first both ways, as ffmpeg's rawvideo has them. PARAMS are the shader's parameters (mask_type=0,...). --warmup N
+draws the first frame N extra times before it, as frames 0 to N - 1, so the state across frames starts settled.
 
 On stderr: `CRT_READY backend; renderer; seconds` once the preset is compiled, `CRT_FRAMES n` after each frame, and
 `CRT_DONE n seconds` at the end. Blender's own messages go to stdout and stderr too.
 
-What follows librashader 0.12.1's runtime (librashader-runtime-gl's filter_chain/chain.rs, librashader-runtime's
+What follows librashader 0.12.1's runtime (librashader-runtime-mtl's filter_chain.rs, librashader-runtime's
 scaling.rs and binding.rs):
-  - each pass's Source is sampled with that pass's filter and wrap mode; an alias with its producing pass's; the
-    Original with the first pass's;
-  - each pass's output is its scale of the source, the viewport or the original, rounded; the last pass draws at
-    the viewport's size, in 8 bits;
-  - every pass uses the identity MVP, and the frame count is 0, as render_video.draw's librashader-cli runs have it;
-  - an image's top row is at v = 0, as librashader uploads it, and the output is read back from v = 0.
-Not done: mip levels (Blender's Python can't build them). crt-royale reads them only from its large mask textures
-(mask_sample_mode 1, not the default) and for its last pass's input, which it samples at full size here.
-Against librashader-cli on the same Mac (Metal) its frames are 0.003/255 apart on average, for every mask.
+  - each pass's Source is sampled with that pass's filter and wrap mode; an alias, PassOutputN, or a feedback with
+    its producing pass's; the Original and OriginalHistory0 (which binding.rs binds to the Original) with the first
+    pass's;
+  - each pass's output is its scale of the source, the viewport or the original, rounded, in its format
+    (R16G16B16A16Sfloat as RGBA16F); the last pass draws at the viewport's size into the host's 8-bit target;
+  - frame n of the video (after the warm-up) is drawn with FrameCount = N + n, modulo the pass's frame_count_mod;
+  - a pass read as <alias>Feedback (guest's afterglow and average luminance) has two targets, swapped before each
+    frame: it reads its output of the frame before, black (zero) on the first frame;
+  - the host's other values are librashader-cli's defaults (HOST): FrameDirection 1, OriginalFPS 1, HDRMode 0 (SDR),
+    BrightnessNits 200, ...; a scalar that nothing declares as a parameter is 0;
+  - every pass uses the identity MVP; an image's top row is at v = 0, as librashader uploads it, and the output is
+    read back from v = 0.
+split() rewrites what Blender's GLSL-to-Metal translation can't compile, the same way for OpenGL:
+  - a whole-array copy in a declaration (`vec3 a[9] = b;`, crt-royale's last pass) or an assignment
+    (`a = b;`, guest-ntsc's ntsc-pass2) as a loop over the elements;
+  - a local array initialised by a constructor (`float a[33] = float[](...);`, ntsc-pass2) as its declaration and one
+    assignment per element. Making it const doesn't work: the pass assigns to it later;
+  - constant arrays of arrays (Megatron's mask tables, `const uint t[3][4][3] = uint[][][](...)`) as flat arrays,
+    each use `t[a][b][c]` as `t[((int(a)) * 4 + int(b)) * 3 + int(c)]`, and without the #extension line;
+  - each constant array (`const float k[15] = float[](...)`) as a function with a switch, each `k[i]` as
+    `k(int(i))`. This one is for speed: Blender's Metal backend makes the shader's global constants members of a
+    class that every pixel builds, and Megatron's last pass took 280 ms a 3504x2880 frame on the Mac instead of 32.
+crt-royale's source comes out of them as before, so its frames are byte for byte the same.
+Not done: mip levels (Blender's Python can't build them; librashader builds them for a pass whose next pass has
+mipmap_input). crt-royale reads them only from its large mask textures (mask_sample_mode 1, not the default) and for
+its last pass's input, which it samples at full size here. guest reads them only in avg-lum.slang's textureLod, for
+the average luminance in the alpha channel, which only moves the picture through raster bloom (BLOOM, 0 by default).
+Against librashader-cli on the same Mac (Metal) frames are 0.003/255 apart on average for crt-royale, and within
+0.001/255 for guest, guest-ntsc and Megatron, on every look tried.
 """
 import json
+import math
 import os
 import queue
 import re
@@ -33,9 +55,12 @@ import threading
 import time
 from pathlib import Path
 
-import gpu
-import numpy as np
-from gpu_extras.batch import batch_for_shader
+try:
+    import gpu
+    import numpy as np
+    from gpu_extras.batch import batch_for_shader
+except ImportError:   # outside Blender: test_crt.py tests the GLSL rewrites
+    gpu = np = batch_for_shader = None
 
 TYPES = {"float": "FLOAT", "vec2": "VEC2", "vec3": "VEC3", "vec4": "VEC4", "mat4": "MAT4", "uint": "UINT", "int": "INT"}
 SIZE = {"float": 4, "uint": 4, "int": 4, "vec2": 8, "vec3": 12, "vec4": 16, "mat4": 64}
@@ -43,11 +68,172 @@ FORMATS = {"R8G8B8A8Srgb": "SRGB8_A8", "R16G16B16A16Sfloat": "RGBA16F", "R8G8B8A
 WRAP = {"ClampToBorder": "CLAMP_TO_BORDER", "ClampToEdge": "EXTEND", "Repeat": "REPEAT",
         "MirroredRepeat": "MIRRORED_REPEAT"}
 IDENTITY = [1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0, 0, 0, 0, 0, 1.0]
+# What librashader-cli 0.12.1 binds for the host's semantics by default (librashader-runtime's binding.rs, FrameOptions)
+HOST = dict(FrameDirection=1, Rotation=0, TotalSubFrames=1, CurrentSubFrame=1, OriginalFPS=1.0, FrameTimeDelta=0,
+            HDRMode=0, BrightnessNits=200.0, ExpandGamut=0, Scanlines=0.0, InverseTonemap=0.0, HDR10=0.0,
+            SubpixelLayout=0)
 QUAD = (((-1, -1, 0, 1), (1, -1, 0, 1), (-1, 1, 0, 1), (1, 1, 0, 1)), ((0, 0), (1, 0), (0, 1), (1, 1)))
 
 
 def fields(block):
     return [tuple(m.split()) for m in (x.strip().rstrip(";") for x in block.split("\n")) if m]
+
+
+def closing(text, i):
+    """The index just past the bracket that closes the one at text[i]."""
+    want = []
+    for j in range(i, len(text)):
+        c = text[j]
+        if c in "([{":
+            want.append(")]}"["([{".index(c)])
+        elif c in ")]}":
+            if not want or want.pop() != c:
+                break
+            if not want:
+                return j + 1
+    raise ValueError(f"unbalanced {text[i]!r} at {i}: {text[i:i + 60]!r}")
+
+
+def arguments(text):
+    """The comma-separated items of `text`, outside any brackets."""
+    items, depth, start = [], 0, 0
+    for j, c in enumerate(text):
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+        elif c == "," and depth == 0:
+            items.append(text[start:j].strip())
+            start = j + 1
+    return items + [text[start:].strip()]
+
+
+CONSTRUCTOR = re.compile(r"\w+(?:\[\d*\])+\(")
+
+
+def leaves(expr):
+    """The elements of a (nested) array constructor `T[][](T[](a, b), ...)`, in order."""
+    m = CONSTRUCTOR.match(expr)
+    if not m or closing(expr, m.end() - 1) != len(expr):
+        return [expr]
+    return [x for item in arguments(expr[m.end():-1]) for x in leaves(item)]
+
+
+def flat_indices(text, dims):
+    """`a[i][j][k]` for each array `a` of `dims` (name -> its sizes) as `a[((int(i)) * J + int(j)) * K + int(k)]`."""
+    if not dims:
+        return text
+    use = re.compile(r"\b(%s)\s*\[" % "|".join(map(re.escape, dims)))
+    out, pos = [], 0
+    while True:
+        m = use.search(text, pos)
+        if not m:
+            return "".join(out) + text[pos:]
+        name, j, index = m.group(1), m.end() - 1, []
+        for _ in dims[name]:
+            while text[j].isspace():
+                j += 1
+            if text[j] != "[":
+                raise ValueError(f"{name} has {len(dims[name])} dimensions but is indexed with {len(index)}")
+            end = closing(text, j)
+            index.append(flat_indices(text[j + 1:end - 1], dims))
+            j = end
+        flat = f"int({index[0]})"
+        for size, i in zip(dims[name][1:], index[1:]):
+            flat = f"({flat}) * {size} + int({i})"
+        out.append(f"{text[pos:m.start()]}{name}[{flat}]")
+        pos = j
+
+
+NESTED_ARRAY = re.compile(r"^const (\w+) (\w+)((?:\[\d+\]){2,}) = ", re.M)
+
+
+def flatten_nested_arrays(body):
+    """Constant arrays of arrays as one-dimensional arrays, and every use of them indexed to match."""
+    dims, decls, out, pos = {}, [], [], 0
+    for m in NESTED_ARRAY.finditer(body):
+        t, name, sizes = m.group(1), m.group(2), [int(s) for s in re.findall(r"\d+", m.group(3))]
+        ctor = CONSTRUCTOR.match(body, m.end())
+        end = closing(body, ctor.end() - 1)
+        items = leaves(body[m.end():end])
+        if body[end] != ";" or len(items) != math.prod(sizes):
+            raise ValueError(f"can't flatten {name}: {len(items)} elements for {sizes}")
+        dims[name] = sizes
+        decls.append(f"const {t} {name}[{len(items)}] = {t}[]({', '.join(items)});")
+        out.append(f"{body[pos:m.start()]}@FLAT{len(decls) - 1}@")
+        pos = end + 1
+    body = flat_indices("".join(out) + body[pos:], dims)
+    return re.sub(r"@FLAT(\d+)@", lambda m: decls[int(m.group(1))], body)
+
+
+LOCAL_ARRAY = re.compile(r"^([ \t]+)(\w+) (\w+)\[(\d+)\] = \2\[\]\(", re.M)
+
+
+def unroll_local_arrays(body):
+    """`T a[N] = T[](x0, x1, ...);` inside a function as `T a[N]; a[0] = x0; a[1] = x1; ...`."""
+    out, pos = [], 0
+    for m in LOCAL_ARRAY.finditer(body):
+        indent, t, name, n = m.groups()
+        end = closing(body, m.end() - 1)
+        items = arguments(body[m.end():end - 1])
+        if body[end] != ";" or len(items) != int(n):
+            raise ValueError(f"can't unroll {name}: {len(items)} elements for {n}")
+        out.append(f"{body[pos:m.start()]}{indent}{t} {name}[{n}];"
+                   + "".join(f" {name}[{k}] = {x};" for k, x in enumerate(items)))
+        pos = end + 1
+    return "".join(out) + body[pos:]
+
+
+def copy_arrays(body):
+    """`a = b;` for two arrays as a loop over their elements."""
+    sizes = dict(re.findall(r"\b(?:float|u?int|bool|[iub]?vec[234]|mat[234]) (\w+)\[(\d+)\]", body))
+    def loop(m):
+        indent, a, b = m.groups()
+        if a not in sizes or sizes.get(b) != sizes[a]:
+            return m.group(0)
+        return f"{indent}for (int _k = 0; _k < {sizes[a]}; _k++) {{ {a}[_k] = {b}[_k]; }}"
+    return re.sub(r"^([ \t]+)(\w+) = (\w+);$", loop, body, flags=re.M)
+
+
+CONSTANT_ARRAY = re.compile(r"^const (\w+) (\w+)\[(\d+)\] = \1\[\]\(", re.M)
+
+
+def calls(text, names):
+    """Each `a[i]` of an array in `names` as `a(int(i))`."""
+    if not names:
+        return text
+    use, out, pos = re.compile(r"\b(%s)\s*\[" % "|".join(map(re.escape, names))), [], 0
+    while True:
+        m = use.search(text, pos)
+        if not m:
+            return "".join(out) + text[pos:]
+        end = closing(text, m.end() - 1)
+        out.append(f"{text[pos:m.start()]}{m.group(1)}(int({calls(text[m.end():end - 1], names)}))")
+        pos = end
+
+
+def constant_tables(body):
+    """`const T a[N] = T[](x0, ...);` as a function `T a(int i)` with a switch, each `a[i]` as `a(int(i))`."""
+    tables = []
+    for m in CONSTANT_ARRAY.finditer(body):
+        end = closing(body, m.end() - 1)
+        items = arguments(body[m.end():end - 1])
+        if body[end] != ";" or len(items) != int(m.group(3)):
+            raise ValueError(f"can't read {m.group(2)}: {len(items)} elements for {m.group(3)}")
+        tables.append((m.start(), end + 1, m.group(1), m.group(2), items))
+    rest = "".join(body[s:e] for s, e in zip([0] + [t[1] for t in tables], [t[0] for t in tables] + [len(body)]))
+    # an array used as a whole somewhere stays as it is
+    names = [t[3] for t in tables if re.findall(rf"\b{t[3]}\b\s*(.?)", rest).count("[") ==
+             len(re.findall(rf"\b{t[3]}\b", rest))]
+    out, pos = [], 0
+    for start, end, t, name, items in tables:
+        if name in names:
+            cases = " ".join(f"case {k}: return {x};" for k, x in enumerate(items[:-1]))
+            out.append(f"{body[pos:start]}{t} {name}(int i) {{ switch (i) {{ {cases} default: return {items[-1]}; }} }}")
+        else:
+            out.append(body[pos:end])
+        pos = end
+    return calls("".join(out) + body[pos:], names)
 
 
 def split(src):
@@ -61,11 +247,14 @@ def split(src):
     for m in (ubo, push):
         if m:
             body = body.replace(m.group(0), "")
-    skip = re.compile(r"^(#version|uniform sampler2D|(layout\(location = \d+\) )?(in|out) \w+ \w+;)")
+    skip = re.compile(r"^(#version|#extension GL_ARB_arrays_of_arrays|uniform sampler2D|"
+                      r"(layout\(location = \d+\) )?(in|out) \w+ \w+;)")
     body = "\n".join(line for line in body.split("\n") if not skip.match(line))
+    body = flatten_nested_arrays(body)
     # Blender's GLSL-to-Metal translation can't copy a whole array (`vec3 a[9] = b;`, in crt-royale's last pass)
     body = re.sub(r"(\w+) (\w+)\[(\d+)\] = (\w+);", r"\1 \2[\3]; for (int _k = 0; _k < \3; _k++) { \2[_k] = \4[_k]; }",
                   body)
+    body = constant_tables(copy_arrays(unroll_local_arrays(body)))
     for old, new in ((ubo and ubo.group(2), "ubo"), (push and push.group(3), "push")):
         if old:
             body = re.sub(rf"\b{old}\b", new, body)
@@ -93,7 +282,7 @@ class Block:
     def pack(self, values):
         data = np.zeros(self.floats, dtype=np.float32)
         for n, (o, k, t) in self.offsets.items():
-            v = values[n]
+            v = values.get(n, 0) if k == 1 else values[n]   # a scalar no parameter declares is 0, as in librashader
             if t in ("uint", "int"):
                 data[o:o + 1].view(np.uint32 if t == "uint" else np.int32)[0] = int(v)
             else:
@@ -173,6 +362,10 @@ class Chain:
         self.params = dict(doc["params"], **params)
         self.passes = [Pass(m, (folder / f"p{m['id']}.vertex.glsl").read_text(encoding="utf-8"),
                             (folder / f"p{m['id']}.fragment.glsl").read_text(encoding="utf-8")) for m in self.metas]
+        # librashader reports an empty alias as the two characters ""
+        self.alias = [m["alias"] if m["alias"] not in (None, "", '""') else None for m in self.metas]
+        read = {name[len("LIBRA_TEXTURE_"):] for p in self.passes for name in p.samplers}
+        self.feedback = {j for j, a in enumerate(self.alias) if f"{a}Feedback" in read or f"PassFeedback{j}" in read}
         sizes = json.loads((luts / "luts.json").read_text(encoding="utf-8"))
         self.luts = {}
         for lut in doc["luts"]:
@@ -183,6 +376,14 @@ class Chain:
             self.luts[lut["name"]] = tex
         self.key = None
 
+    def target(self, size, fmt, clear=False):
+        tex = gpu.types.GPUTexture(size, format=fmt)
+        fb = gpu.types.GPUFrameBuffer(color_slots=(tex,))
+        if clear:
+            with fb.bind():
+                fb.clear(color=(0.0, 0.0, 0.0, 0.0))
+        return tex, fb
+
     def ensure(self, src_size):
         if self.key == src_size:
             return
@@ -192,11 +393,13 @@ class Chain:
                       scaled(m["scale_y"], source[1], self.out_size[1], src_size[1]))
             sizes.append(source)
         sizes[-1] = self.out_size
-        self.targets = []
+        self.targets, self.previous = [], {}
         for i, (m, s) in enumerate(zip(self.metas, sizes)):
+            # the last pass draws into the host's 8-bit target, whatever its own format
             fmt = "RGBA8" if i == len(self.metas) - 1 else FORMATS.get(m["format"], "RGBA8")
-            tex = gpu.types.GPUTexture(s, format=fmt)
-            self.targets.append((tex, gpu.types.GPUFrameBuffer(color_slots=(tex,))))
+            self.targets.append(self.target(s, fmt, clear=i in self.feedback))
+            if i in self.feedback:
+                self.previous[i] = self.target(s, fmt, clear=True)
         self.copies, self.key = {}, src_size
 
     def sampled(self, tex, filt, wrap, key, used):
@@ -219,27 +422,35 @@ class Chain:
     def draw(self, image, frame=0):
         src_size = (image.width, image.height)
         self.ensure(src_size)
-        source, aliases = image, {}
+        # as librashader does before each frame: a feedback pass draws over its older output, and reads the last
+        for j, old in self.previous.items():
+            self.previous[j], self.targets[j] = self.targets[j], old
+        first = self.metas[0]
+        inputs = {"Original": (image, first), "OriginalHistory0": (image, first)}   # binding.rs: history 0 = Original
+        for j, (tex, _) in self.previous.items():
+            inputs[f"PassFeedback{j}"] = (tex, self.metas[j])
+            if self.alias[j]:
+                inputs[f"{self.alias[j]}Feedback"] = (tex, self.metas[j])
+        host = dict(HOST, MVP=IDENTITY, OriginalSize=size_vec(*src_size), FinalViewportSize=size_vec(*self.out_size),
+                    OriginalAspect=src_size[0] / src_size[1], OriginalAspectRotated=src_size[0] / src_size[1])
+        source = image
         for i, (p, m) in enumerate(zip(self.passes, self.metas)):
             tex, fb = self.targets[i]
-            values = dict(self.params, MVP=IDENTITY, SourceSize=size_vec(source.width, source.height),
-                          OriginalSize=size_vec(*src_size), OutputSize=size_vec(tex.width, tex.height),
-                          FinalViewportSize=size_vec(*self.out_size),
+            values = dict(self.params, **host, SourceSize=size_vec(source.width, source.height),
+                          OutputSize=size_vec(tex.width, tex.height),
                           FrameCount=frame % m["frame_count_mod"] if m["frame_count_mod"] else frame)
-            for name, j in aliases.items():
-                values[f"{name}Size"] = size_vec(self.targets[j][0].width, self.targets[j][0].height)
+            for name, (t, _) in inputs.items():
+                values[f"{name}Size"] = size_vec(t.width, t.height)
+            for name, t in self.luts.items():
+                values[f"{name}Size"] = size_vec(t.width, t.height)
             used, binds = {}, {}
             for name in p.samplers:
                 key = name[len("LIBRA_TEXTURE_"):]
                 if key == "Source":
                     binds[name] = self.sampled(source, m["filter"], m["wrap"], ("Source", i), used)
-                elif key == "Original":
-                    first = self.metas[0]
-                    binds[name] = self.sampled(image, first["filter"], first["wrap"], ("Original", i), used)
-                elif key in aliases:
-                    j = aliases[key]
-                    binds[name] = self.sampled(self.targets[j][0], self.metas[j]["filter"], self.metas[j]["wrap"],
-                                               (key, i), used)
+                elif key in inputs:
+                    t, by = inputs[key]
+                    binds[name] = self.sampled(t, by["filter"], by["wrap"], (key, i), used)
                 elif key in self.luts:
                     binds[name] = self.luts[key]
                 else:
@@ -253,8 +464,9 @@ class Chain:
                 for name, t in binds.items():
                     p.shader.uniform_sampler(name, t)
                 p.batch.draw(p.shader)
-            if m["alias"]:
-                aliases[m["alias"]] = i
+            inputs[f"PassOutput{i}"] = (tex, m)
+            if self.alias[i]:
+                inputs[self.alias[i]] = (tex, m)
             source = tex
         return self.targets[-1]
 
@@ -283,6 +495,7 @@ def main():
     a = sys.argv[sys.argv.index("--") + 1:]
     chain_dir, luts, in_fd, out_fd = Path(a[0]), Path(a[1]), int(a[2]), int(a[3])
     w, h, ow, oh, params = int(a[4]), int(a[5]), int(a[6]), int(a[7]), a[8]
+    warmup = int(a[a.index("--warmup") + 1]) if "--warmup" in a[9:] else 0
     t0 = time.time()
     gpu.init()
     chain = Chain(chain_dir, luts, parse_params(params), (ow, oh))
@@ -313,7 +526,11 @@ def main():
                 data = read_exactly(fin, frame_bytes)
                 if len(data) < frame_bytes:
                     break
-                _, fb = chain.draw(texture(w, h, data), 0)
+                image = texture(w, h, data)
+                if n == 0:
+                    for k in range(warmup):
+                        chain.draw(image, k)
+                _, fb = chain.draw(image, warmup + n)
                 with fb.bind():
                     out_q.put(memoryview(fb.read_color(0, 0, ow, oh, 4, 0, "UBYTE")))
                 n += 1
@@ -327,4 +544,5 @@ def main():
     report(f"CRT_DONE {n} {time.time() - t0:.1f}")
 
 
-main()
+if __name__ == "__main__":
+    main()

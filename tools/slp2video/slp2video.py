@@ -10,7 +10,8 @@ It runs, in order, whatever the options ask for:
   2. your 3D model in place of the stage (tools/logo-stage, Blender): as wide as the stage from ledge to ledge,
      its top on the stage's top, seen through the game's camera, still or moving (--static-camera or not);
   3. the composite: the fighters over the model, over a solid colour (--bg-color) or kept transparent;
-  4. the CRT (--crt): CRT Royale's realistic pixels (tools/crt, the physical-pixels mode of its render_video.py).
+  4. the CRT (--crt): a CRT shader's realistic pixels, crt-guest-advanced unless --crt-shader says otherwise
+     (tools/crt, the physical-pixels mode of its render_video.py).
      Regular Melee is then recorded at its native resolution, the console's own 640x480 picture, so that every
      row of it is one scanline; Animelee at its --scale (2).
 
@@ -44,6 +45,7 @@ import composite  # noqa: E402
 import plate  # noqa: E402
 import projection  # noqa: E402
 import render_video as crt  # noqa: E402
+import shaders as crt_shaders  # noqa: E402  (tools/crt)
 import stagedata  # noqa: E402
 from slp2alpha import locate, slp, solve, stages  # noqa: E402
 
@@ -57,7 +59,7 @@ EXAMPLES = """examples:
 """
 
 CRT_ROWS = 2880          # output rows the CRT pass aims for: 6 per scanline of the native 480 lines
-CRT_MASKS = tuple(sorted(crt.MASKS))
+CRT_MASKS = crt_shaders.ALL_MASKS   # each shader takes its own (--list-masks in render_video.py)
 PLATE_CACHE = locate.cache_root() / "logo-stage" / "plates"
 # The moving camera's plates, one folder of frames per replay clip, model and finish: rendering the same clip
 # again (another CRT mask, colour or format) skips Blender. About 160 KB a frame, 1.8 GB for a 3-minute game.
@@ -119,13 +121,33 @@ class Plan:
         if args.bg_color and self.background:
             out.append(f"on {self.background}")
         if self.crt:
-            out.append("crt" if args.crt_mask == "grille" else f"crt {args.crt_mask} mask")
+            out.append(crt_label(args))
         return out
+
+
+def crt_label(args) -> str:
+    """"crt" for the default shader's default look; else the shader, and the look unless it's the grille:
+    "crt royale", "crt guest slot", "crt megatron grille3". "no afterglow" where that changes the picture."""
+    shader = crt_shaders.get(args.crt_shader)
+    mask = shader.check_mask(args.crt_mask)
+    words = ["crt"]
+    if shader.id != crt_shaders.DEFAULT or mask != shader.default_mask:
+        words.append(shader.id)
+    if mask != shader.default_mask:
+        words.append(mask)
+    if args.crt_no_afterglow and shader.afterglow_off:
+        words.append("no afterglow")
+    return " ".join(words)
 
 
 def make_plan(args, stage_id: int) -> Plan:
     notes: List[str] = []
     stage = stages.stage_name(stage_id)
+    if args.crt:
+        try:
+            crt_shaders.get(args.crt_shader).check_mask(args.crt_mask)
+        except crt_shaders.ShaderError as e:
+            raise UsageError(f"--crt-mask: {e}")
     if args.crt and not args.animelee:
         scale = args.scale or 1
         if scale != 1:
@@ -348,7 +370,8 @@ def crt_settings(args, lines: int) -> "crt.Settings":
     """render_video.py --physical-pixels for a picture `lines` tall, squeezed to Melee's aspect."""
     return crt.physical_settings(crt_width(lines), lines, args.crt_scale or max(1, round(CRT_ROWS / lines)),
                                  mask=args.crt_mask, triads_per_pixel=args.crt_triads_per_pixel or 0.0,
-                                 params=args.crt_params or "")
+                                 params=args.crt_params or "", shader=args.crt_shader,
+                                 afterglow=not args.crt_no_afterglow)
 
 
 def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, ffprobe: str,
@@ -364,7 +387,8 @@ def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, 
     else:
         squeeze = f"format=gbrp16le,{squeeze},format=bgr0"
     print(f"CRT: {info['frames']} frames of {width}x{lines} -> {settings.width}x{settings.height} "
-          f"({settings.scale} px per scanline, {args.crt_mask} mask)")
+          f"({settings.scale} px per scanline, {crt_shaders.get(settings.shader).name}, {settings.mask} look"
+          f"{'' if settings.afterglow else ', no afterglow'})")
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.monotonic()
     _, runtime = crt.render(video, out, settings, ffmpeg=ffmpeg, librashader=librashader, input_size=(width, lines),
@@ -372,7 +396,8 @@ def crt_pass(args, plan: Plan, video: Path, out: Path, work: Path, ffmpeg: str, 
                             codec="h264-444" if args.format == "mp4" else "prores4444", runtime=args.crt_runtime,
                             jobs=args.crt_jobs, total=info["frames"], on_progress=Progress("CRT"),
                             work=work / "crt", blender=blender)
-    how = "by Blender's GPU module" if runtime == "blender" else f"with librashader's {runtime} runtime"
+    how = {"blender": "by Blender's GPU module", "stream": "by crt-stream (one librashader chain)"}.get(
+        runtime, f"with librashader's {runtime} runtime")
     print(f"CRT: drawn {how} in {time.monotonic() - t0:.0f} s")
     got = video_info(ffprobe, out)["frames"]
     if got != info["frames"]:
@@ -440,22 +465,33 @@ def parse(argv: Sequence[str]):
 
     g = ap.add_argument_group("CRT")
     g.add_argument("--crt", action="store_true",
-                   help="finish with CRT Royale's realistic pixels (tools/crt, its --physical-pixels mode): "
+                   help="finish with a CRT's realistic pixels (tools/crt, its --physical-pixels mode): "
                         "every row of the picture is one scanline. Regular Melee is recorded at its native "
                         "resolution for it, the console's own 640x480 picture")
-    g.add_argument("--crt-mask", choices=CRT_MASKS, default="grille",
-                   help="phosphor mask: aperture grille (default), slot mask or shadow mask")
+    g.add_argument("--crt-shader", choices=list(crt_shaders.SHADERS), default=crt_shaders.DEFAULT,
+                   help="the CRT shader: guest (crt-guest-advanced, the default), guest-ntsc (with a composite "
+                        "signal's colour fringes), megatron (Sony Megatron v2: dark in SDR, turn the screen up) or "
+                        "royale (CRT Royale, slp2video's CRT before 25 November 2026)")
+    g.add_argument("--crt-mask", choices=CRT_MASKS, metavar="LOOK",
+                   help="the shader's phosphor mask (default: grille, an aperture grille). guest: "
+                        f"{', '.join(crt_shaders.get('guest').masks)}; megatron: "
+                        f"{', '.join(crt_shaders.get('megatron').masks)}; royale: "
+                        f"{', '.join(crt_shaders.get('royale').masks)}")
     g.add_argument("--crt-scale", type=positive, metavar="PX",
                    help=f"output pixels per scanline (default: {CRT_ROWS} rows in all: 6 per line at native "
                         "resolution, 3504x2880)")
     g.add_argument("--crt-triads-per-pixel", type=float, metavar="N", help="phosphor triads per picture pixel")
-    g.add_argument("--crt-params", metavar="K=V,...", help="more CRT Royale parameters, e.g. halation_weight=0.1")
+    g.add_argument("--crt-params", metavar="K=V,...",
+                   help="more parameters of the CRT shader, after its look's, e.g. maskstr=0.4 for guest")
+    g.add_argument("--crt-no-afterglow", action="store_true",
+                   help="guest and guest-ntsc without their afterglow: each frame as if it were the first (the "
+                        "other shaders have none)")
     g.add_argument("--crt-jobs", type=positive, default=4, metavar="N",
                    help="frames librashader-cli renders at once (default 4; Blender draws one video in one process)")
     g.add_argument("--crt-runtime", choices=crt.RUNTIMES, default="auto",
                    help="what draws the CRT (default: Blender's GPU module where Blender is found, on macOS and "
-                        "Linux; then librashader's: metal on macOS, d3d11 on Windows, wgpu on Linux, then the "
-                        "others the program has)")
+                        "Linux; then crt-stream where it's built; then librashader-cli's: metal on macOS, d3d11 on "
+                        "Windows, wgpu on Linux, then the others the program has)")
 
     g = ap.add_argument_group("the model (--model)")
     g.add_argument("--model-object", action="append", default=[], metavar="NAME",

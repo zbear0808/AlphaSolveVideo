@@ -108,6 +108,27 @@ class ScaleAndCrt(unittest.TestCase):
         self.assertEqual(p.scale, 2)
         self.assertIn("native resolution", p.notes[0])
 
+    def test_each_shader_takes_its_own_looks(self):
+        for argv in (["--crt-shader", "royale", "--crt-mask", "cgwg"],
+                     ["--crt-shader", "megatron", "--crt-mask", "none"], ["--crt-mask", "pvm2730"]):
+            with self.assertRaisesRegex(slp2video.UsageError, "--crt-mask", msg=argv):
+                plan("--crt", *argv)
+        self.assertTrue(plan("--crt", "--crt-shader", "megatron", "--crt-mask", "pvm2730").crt)
+
+    def test_the_crt_settings_for_each_shader(self):
+        s = slp2video.crt_settings(options("--crt"), 480)
+        self.assertEqual((s.width, s.height, s.scale, s.triad, s.shader, s.mask),
+                         (3504, 2880, 6, 3.0, "guest", "grille"))
+        self.assertIn("shadowMask=6,masksize=1,mask_zoom=0.0", s.params)
+        s = slp2video.crt_settings(options("--crt", "--crt-shader", "royale"), 480)
+        self.assertEqual(s.params, "mask_type=0,mask_triad_size_desired=3.0,interlace_detect_toggle=0,"
+                                   "geom_aspect_ratio_x=1.217,geom_aspect_ratio_y=1.0")
+        s = slp2video.crt_settings(options("--crt", "--crt-shader", "megatron"), 480)
+        self.assertIn("hcrt_crt_resolution=2,hcrt_lcd_subpixel=2", s.params)   # grille3's 3 px table
+        s = slp2video.crt_settings(options("--crt", "--crt-no-afterglow", "--crt-params", "maskstr=0.4"), 480)
+        self.assertTrue(s.params.endswith(",AS=0.0"))
+        self.assertIn(",maskstr=0.4,", s.params)
+
     def test_animelee_on_the_crt_keeps_its_scale(self):
         p = plan("--crt", "--animelee")
         self.assertEqual((p.scale, p.raw, p.notes), (2, True, []))
@@ -189,7 +210,19 @@ class Names(unittest.TestCase):
         args = options("--model", "statue.glb", "--bg-color", "112233", "--crt", "--crt-mask", "slot")
         p = slp2video.make_plan(args, BATTLEFIELD)
         self.assertEqual(slp2video.output_name("game (characters only, raw resolution, 60 fps)", p, args),
-                         "game (characters only, 60 fps), statue stage, on 112233, crt slot mask")
+                         "game (characters only, 60 fps), statue stage, on 112233, crt guest slot")
+
+    def test_the_crt_says_which_shader_and_look(self):
+        for argv, label in ((["--crt"], "crt"), (["--crt", "--crt-mask", "grille"], "crt"),
+                            (["--crt", "--crt-shader", "royale"], "crt royale"),
+                            (["--crt", "--crt-shader", "royale", "--crt-mask", "slot"], "crt royale slot"),
+                            (["--crt", "--crt-shader", "megatron", "--crt-mask", "grille3"], "crt megatron grille3"),
+                            (["--crt", "--crt-shader", "guest-ntsc"], "crt guest-ntsc"),
+                            (["--crt", "--crt-no-afterglow"], "crt no afterglow"),
+                            (["--crt", "--crt-shader", "megatron", "--crt-no-afterglow"], "crt megatron")):
+            args = options("--keep-background", *argv)
+            p = slp2video.make_plan(args, BATTLEFIELD)
+            self.assertEqual(slp2video.output_name("game (raw resolution)", p, args), f"game, {label}", argv)
 
     def test_the_crt_drops_the_raw_label(self):
         args = options("--keep-background", "--crt")
