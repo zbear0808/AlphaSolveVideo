@@ -11,7 +11,7 @@ Guides for features integrated into `python3 -m slp2alpha render`:
 | Guide | Description | Key Options |
 |---|---|---|
 | **[One Command: Replay to Video](slp2video.md)** | `tools/slp2video`: the render, your 3D model as the stage, transparency or a colour, and a CRT look, in one command. | `--model`, `--keep-background`, `--crt` |
-| **[CRT](../tools/crt/README.md)** | `tools/crt`: CRT Royale on any video through librashader, with the shaders vendored, on macOS, Linux and Windows. | `render_video.py --physical-pixels`, `install_librashader.py` |
+| **[CRT](../tools/crt/README.md)** | `tools/crt`: crt-guest-advanced, its NTSC version, Sony Megatron v2 or CRT Royale on any video, drawn by Blender or librashader, with the shaders vendored, on macOS, Linux and Windows. | `render_video.py --physical-pixels`, `install_librashader.py` |
 | **[Rendering Clips](clips.md)** | Render specific frame ranges (e.g., combos) without rendering entire replays. | `--start-frame`, `--end-frame` |
 | **[Static Camera](static-camera.md)** | Lock the camera in place using Melee's fixed-camera mode with screen shake disabled. | `--static-camera` |
 | **[Custom Shy Guy Sprites](shy-guy-sprite.md)** | Replace Yoshi's Story Shy Guys with a custom logo or image via Dolphin custom textures. | `--shy-guy-sprite`, `--scale` |

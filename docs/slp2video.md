@@ -1,6 +1,6 @@
 # One command, replay to finished video
 
-`python3 tools/slp2video/slp2video.py REPLAY.slp [options]` takes a Slippi replay to a finished video in one go. Each option switches a step on or off. The render is `slp2alpha render`; your 3D model in place of the stage is the logo stage's Blender plate; then the composite; then the CRT pass from the crt-royale project.
+`python3 tools/slp2video/slp2video.py REPLAY.slp [options]` takes a Slippi replay to a finished video in one go. Each option switches a step on or off. The render is `slp2alpha render`; your 3D model in place of the stage is the logo stage's Blender plate; then the composite; then the CRT pass, with the shaders and settings of the crt-royale project.
 
 ```sh
 python3 tools/slp2video/slp2video.py game.slp                                     # the stage without its background, transparent
@@ -22,7 +22,7 @@ The result is one file next to the replay (`--out-dir DIR`, or `-o FILE`), named
 | Transparency | on by default | `--no-transparency` flattens onto black, `--bg-color HEX` onto a colour; `--format mp4` flattens, or with `--transparency` writes a matte file beside it |
 | A static or a moving camera | `--static-camera` | Default: the game's own moving camera |
 | Regular Melee or Animelee | `--animelee` | The cel-shaded skins ([tools/animelee](../tools/animelee/README.md)) |
-| A CRT | `--crt` | CRT Royale's realistic pixels, at the console's native resolution for regular Melee |
+| A CRT | `--crt` | A CRT shader's realistic pixels (crt-guest-advanced; `--crt-shader`), at the console's native resolution for regular Melee |
 
 Also: `--start-frame` and `--end-frame` ([clips.md](clips.md)), `--characters-only`, `--hud`/`--no-hud`, `--nametag P1=TEXT` and `--no-nametags` ([nametags.md](nametags.md)), `--hide-items`, `--hide-effects`, `--scale`, and the tool locations (`--dolphin`, `--iso`, `--ffmpeg`, `--blender`, `--librashader`). Options after a lone `--` go to `slp2alpha render` unchanged. `--keep-intermediates` keeps the work folder: the render, its alpha map, the camera export, the composite. After a failure the work folder is always kept, and its path printed.
 
@@ -60,20 +60,34 @@ Checked with a flat card fitted to Battlefield, through the moving camera: its t
 
 ## The CRT
 
-`--crt` finishes with CRT Royale, the original shader rendered by librashader, in its physical-pixels mode: every pixel of the picture is drawn as a real CRT draws it, with the beam's profile, the gaps between scanlines and the phosphor triads.
+`--crt` finishes with a CRT shader, the original from libretro's slang-shaders, in its physical-pixels mode: every pixel of the picture is drawn as a real CRT draws it, with the beam's profile, the gaps between scanlines and the phosphor triads. The shader is crt-guest-advanced unless `--crt-shader` says otherwise:
+
+| `--crt-shader` | | Light kept |
+|---|---|---|
+| `guest` (default) | crt-guest-advanced, by guest(r). Its phosphors glow on for a few frames on dark trails (the afterglow) | 57–72% |
+| `guest-ntsc` | the same CRT behind a composite NTSC signal: colour fringes and bleed, a chroma phase that alternates every frame | about guest's |
+| `megatron` | Sony Megatron v2, in SDR: a binary mask at full strength, as the shader is designed for an HDR screen. Dark: turn the screen up | 19–27% |
+| `royale` | CRT Royale, slp2video's CRT before 25 November 2026. **`--crt-shader royale` gives the old look**, frame for frame | 83–94% |
+
+The light kept is the picture's mean light against the source's, as the crt-royale project measured it. [`tools/crt`](../tools/crt/README.md#the-shaders) has the details of each.
 
 - **Regular Melee is recorded at its native resolution**: `--scale 1` and `render --raw-resolution`, the console's own 640x480 picture, one row for each of the 480 lines it sends to the TV. Dolphin's usual 640x528 stretches those 480 rows to the TV's shape by blending neighbouring rows, which would put 528 scanlines on the tube, some of them a mix of two. `--scale 2` is allowed (with a note); its scanlines are then half as tall.
 - **Animelee** is recorded at its `--scale` (2 by default), also unstretched: 960 rows, each one a scanline, a sharper high-resolution set.
 - **The shape.** The picture is squeezed sideways to the shape Melee draws it for, 1.2173 times as wide as tall (its camera's aspect): 584x480, or 1168x960. The analog signal has no columns, so this loses nothing a tube would show. Then each row becomes a scanline 6 px tall at native resolution (3 px for Animelee's 960 rows): 3504x2880 either way, with 3 px triads. `--crt-scale` sets the pixels per scanline.
-- **The mask.** `--crt-mask grille` (aperture grille, the default), `slot` or `shadow`. `--crt-triads-per-pixel` and `--crt-params` (e.g. `halation_weight=0.1`) go to the renderer.
-- **Transparency** survives: the renderer keeps the alpha. The model and the background colour are composited before the CRT, so they're on the tube too.
-- **Speed and disk.** Where Blender is found (macOS, Linux), Blender's GPU module draws the CRT in one process for the whole video, and the encoder sets the pace ([`report-gpu-crt.md`](report-gpu-crt.md)).
+- **The mask.** `--crt-mask` takes the shader's looks, `grille` (an aperture grille) by default for each. guest has 12, among them `slot`, `shadow`, `grille-soft` and `none`; Megatron `grille`, `slot`, `shadow`, `grille3` and four real monitors (`pvm2730`, `pvm20l4`, `pvm1910`, `mx8000`); Royale `grille`, `slot` and `shadow`. A look the shader hasn't is refused. `python3 tools/crt/render_video.py --list-masks` lists them all. At slp2video's 3 px triads:
+  - guest's grille is its R | G | B grille, 3 px, at mask strength 0.5 (`shadowMask 6`, `masksize 1`, no zoom). Its scanlines follow the picture's rows by themselves;
+  - Megatron's patterns are fixed, per output pixel, so the 3 px pitch picks the nearest of each look's screen type. Its `grille` (4 px R G B X) becomes the 3 px R G B grille, `grille3`'s, and so do the monitors with a grille; the shadow mask stays 6 px dots.
+- **The afterglow.** Blender keeps guest's afterglow from frame to frame. `--crt-no-afterglow` draws guest without it (the other shaders have none). Without Blender, `librashader-cli` draws each frame on its own: guest loses its afterglow (slp2video says so), which only shows below 8/255.
+- **More parameters.** `--crt-triads-per-pixel` and `--crt-params` (more of the shader's own parameters, e.g. `maskstr=0.4` for guest, `halation_weight=0.1` for Royale) go to the renderer.
+- **The file name** says `crt` for guest's grille, and otherwise the shader and the look: `crt guest slot`, `crt royale`, `crt megatron grille3`, `crt no afterglow`.
+- **Transparency** survives: the renderer keeps the alpha. The model and the background colour are composited before the CRT, so they're on the tube too. guest's afterglow is then cut off by that alpha, so it only shows where the picture is opaque (`--keep-background`, a model, or a background colour).
+- **Speed and disk.** Where Blender is found (macOS, Linux), Blender's GPU module draws the CRT in one process for the whole video, and the encoder sets the pace ([`report-gpu-crt.md`](report-gpu-crt.md)). These numbers are CRT Royale's.
   - **On an M1,** 3504x2880 frames go into Apple's ProRes at 19 a second when the fighters are alone, and 4 when every pixel is drawn. That's about 4 times `librashader-cli`'s speed. `--format mp4` is slower there (1.2–5.6 a second), because `libx264` encodes it.
   - **On a Linux PC with a GTX 1060,** they go 6–8 a second into `prores_aw` and 12–13 into NVENC: 3–6 times `librashader-cli`'s speed.
   - **A 3-minute game's CRT** takes 14–31 minutes on the PC, and 10–45 on the M1, depending on the picture and the format.
   - **Disk:** frames stream from one ffmpeg through the renderer into another, so nothing but the few frames in flight touches the disk. The encoder is Apple's ProRes where it works (ten times faster than `prores_ks` at this size), else `prores_aw` (about four times), else `prores_ks`. A minute of 3504x2880 ProRes 4444 is about 23 GB; `--format mp4` is H.264 4:4:4 (chroma subsampling would smear the phosphor stripes), which VLC and editors play but QuickTime doesn't. With an NVIDIA GPU it's encoded by NVENC, about seven times `libx264`'s speed on a GTX 1060, at least as close to the drawn frames, in files about four times as big (about 10 GB a minute).
 
-The renderer is [`tools/crt`](../tools/crt/README.md): the crt-royale TouchDesigner project's `render_video.py`, brought into this repo with the shaders it needs (libretro's slang-shaders at `2345ee91`, the 38 files the preset uses). Blender draws them, from the preset as `librashader-cli` 0.12.1 compiles it (`tools/crt/blender-chain/`): its frames are 0.003/255 from `librashader-cli`'s. Without Blender, or on Windows, `librashader-cli` draws them: `python3 tools/crt/install_librashader.py` builds it with Rust into `packages/librashader/` (or `--librashader PATH`), and its runtime is the platform's: Metal on macOS, Direct3D 11 on Windows, wgpu on Vulkan on Linux. `--crt-runtime` picks one (default `auto`). On the same picture and settings `librashader-cli` gives exactly the frames the crt-royale project's script gave.
+The renderer is [`tools/crt`](../tools/crt/README.md): the crt-royale TouchDesigner project's `render_video.py`, brought into this repo with the shaders it needs (libretro's slang-shaders at `2345ee91`, the files the four presets use). Blender draws them, from each preset as `librashader-cli` 0.12.1 compiles it (`tools/crt/blender-chain/<shader>/`): Royale's frames are 0.003/255 from `librashader-cli`'s. Without Blender, or on Windows, `librashader-cli` draws them: `python3 tools/crt/install_librashader.py` builds it with Rust into `packages/librashader/` (or `--librashader PATH`), and its runtime is the platform's: Metal on macOS, Direct3D 11 on Windows, wgpu on Vulkan on Linux. `--crt-runtime` picks one (default `auto`). On the same picture and settings `librashader-cli` gives exactly the frames the crt-royale project's script gave.
 
 - **Encoding loses some of the finest detail.** Phosphor stripes and scanline gaps are about the hardest picture there is to compress. Against the drawn frames, ProRes 4444 through Apple's encoder came to 31.7 dB (on average 4.9/255 off), the XQ profile 36.4 dB at 1.5 times the size, and the H.264 4:4:4 of `--format mp4` 35.3 dB at a sixth of ProRes's size [measured on 10 frames at 3840x2880].
 
@@ -104,8 +118,8 @@ For a 4 s clip (240 frames) with the logo through the moving camera and the CRT,
 | Model, fixed camera | 2 to 3 s, once per stage, finish and size | — |
 | Model, moving camera (2 Blender processes, 16 samples, the logo without shadows) | 18 s | 17 s |
 | Composite | 1 s | 2 s |
-| CRT, Blender's GPU module | 13–17 s (ProRes) | 27–28 s (ProRes), 16–17 s (`.mp4`, NVENC) |
-| CRT, `librashader-cli` | 58 s | 119 s |
+| CRT (Royale), Blender's GPU module | 13–17 s (ProRes) | 27–28 s (ProRes), 16–17 s (`.mp4`, NVENC) |
+| CRT (Royale), `librashader-cli` | 58 s | 119 s |
 | All of it | 41 s | 60 s (`.mp4`: 49 s) |
 
 ## Files

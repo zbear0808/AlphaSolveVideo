@@ -21,19 +21,24 @@ import blender_crt  # noqa: E402   (its GLSL rewrites; without Blender it doesn'
 import render_video as rv  # noqa: E402
 import vendor_shaders  # noqa: E402
 from slp2alpha import locate  # noqa: E402
+from test_shaders import NtscPhase, Profiles, Runtimes as ShaderRuntimes, Settings  # noqa: E402,F401
+
+
+ROYALE = dict(shader="royale")
 
 
 class PhysicalPixels(unittest.TestCase):
-    """The numbers the crt-royale project's render_video.py --physical-pixels worked out."""
+    """The numbers the crt-royale project's render_video.py --physical-pixels worked out (CRT Royale's parameters, as
+    render_video.py has always written them)."""
 
     def test_melee_at_native_resolution(self):
-        s = rv.physical_settings(584, 480, 6)
+        s = rv.physical_settings(584, 480, 6, **ROYALE)
         self.assertEqual((s.width, s.height, s.triad), (3504, 2880, 3.0))
         self.assertEqual(s.params, "mask_type=0,mask_triad_size_desired=3.0,interlace_detect_toggle=0,"
                                    "geom_aspect_ratio_x=1.217,geom_aspect_ratio_y=1.0")
 
     def test_animelee_at_scale_2(self):
-        s = rv.physical_settings(1168, 960, 3, mask="slot")
+        s = rv.physical_settings(1168, 960, 3, mask="slot", **ROYALE)
         self.assertEqual((s.width, s.height, s.triad), (3504, 2880, 3.0))
         self.assertTrue(s.params.startswith("mask_type=1,"))
 
@@ -50,24 +55,24 @@ class PhysicalPixels(unittest.TestCase):
         self.assertEqual(rv.physical_settings(1920, 1080).scale, 4)
 
     def test_aspects(self):
-        s = rv.physical_settings(640, 480, 6, aspect="16:9")
+        s = rv.physical_settings(640, 480, 6, aspect="16:9", **ROYALE)
         self.assertEqual((s.width, s.height), (5120, 2880))
         self.assertIn("geom_aspect_ratio_x=16.0,geom_aspect_ratio_y=9.0", s.params)
         self.assertEqual(rv.physical_settings(641, 481, 1).width, 642)  # even, for the encoders
 
     def test_extra_params_go_last(self):
-        self.assertTrue(rv.physical_settings(584, 480, 6, params="halation_weight=0.1").params
+        self.assertTrue(rv.physical_settings(584, 480, 6, params="halation_weight=0.1", **ROYALE).params
                         .endswith(",halation_weight=0.1"))
 
 
 class StandardMode(unittest.TestCase):
     def test_square(self):
-        s, vf = rv.standard_settings("1280", 288, "crop")
+        s, vf = rv.standard_settings("1280", 288, "crop", **ROYALE)
         self.assertEqual((s.width, s.height, s.triad), (1280, 1280, 3.0))
         self.assertIn("scale=288:288", vf)
 
     def test_wide(self):
-        s, vf = rv.standard_settings("1920x1080", 240, "letterbox", mask="shadow")
+        s, vf = rv.standard_settings("1920x1080", 240, "letterbox", mask="shadow", **ROYALE)
         self.assertEqual((s.width, s.height, s.triad), (1920, 1080, 4.5))
         self.assertIn("geom_aspect_ratio_x=1.778", s.params)
         self.assertIn("pad=240:240", vf)
@@ -144,7 +149,7 @@ class Candidates(unittest.TestCase):
         self.assertEqual(rv.candidates("cli", "blender", platform="linux", preset=other)[0], "wgpu")
 
     def test_blender_reads_and_writes_through_inherited_pipes(self):
-        settings = rv.physical_settings(584, 480, 6)
+        settings = rv.physical_settings(584, 480, 6, **ROYALE)
         cmd = rv.blender_command("blender", Path("luts"), 5, 7, (584, 480), settings, platform="linux")
         self.assertEqual(cmd[cmd.index("--") + 1:], [str(rv.BLENDER_CHAIN), "luts", "5", "7", "584", "480", "3504",
                                                      "2880", settings.params])
@@ -309,7 +314,7 @@ class Render(unittest.TestCase):
         # triads: 3 px triads need a screen at least 768 px wide and tall (136 x 6 = 816)
         width = height = 136
         scale = 6
-        settings = rv.physical_settings(width, height, scale)
+        settings = rv.physical_settings(width, height, scale, **ROYALE)
         with tempfile.TemporaryDirectory() as tmp:
             src, dst = Path(tmp) / "in.bmp", Path(tmp) / "out.bmp"
             src.write_bytes(rv.bmp_bytes(bytes([128]) * (width * height * 3), width, height))
@@ -458,7 +463,7 @@ class BlenderRender(unittest.TestCase):
 
     def test_frames_match_librashader(self):
         width = height = 136   # 816x816 at 6x: room for crt-royale's mask tiles (see Render)
-        settings = rv.physical_settings(width, height, 6, mask="slot")
+        settings = rv.physical_settings(width, height, 6, mask="slot", **ROYALE)
         with tempfile.TemporaryDirectory() as tmp:
             src = Path(tmp) / "in.nut"
             subprocess.run([self.ffmpeg, "-v", "error", "-f", "lavfi", "-i",
