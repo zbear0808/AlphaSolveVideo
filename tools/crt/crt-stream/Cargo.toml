@@ -1,0 +1,34 @@
+[package]
+name = "crt-stream"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88"
+description = "A video's raw frames through one persistent librashader filter chain, stdin to stdout"
+license = "GPL-3.0-only"
+publish = false
+
+[dependencies]
+anyhow = "1"
+librashader = { version = "=0.12.1", default-features = false, features = ["presets", "preprocess", "runtime-wgpu"] }
+pollster = "0.4"
+
+[target.'cfg(target_vendor = "apple")'.dependencies]
+librashader = { version = "=0.12.1", default-features = false, features = ["runtime-metal"] }
+objc2 = "0.6"
+objc2-metal = "0.3"
+wgpu = { version = "30", default-features = false, features = ["metal"] }
+
+[target.'cfg(windows)'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["dx12", "vulkan"] }
+
+[target.'cfg(all(unix, not(target_vendor = "apple")))'.dependencies]
+wgpu = { version = "30", default-features = false, features = ["vulkan"] }
+
+[profile.release]
+opt-level = 3
+
+# librashader's Metal and wgpu runtimes 0.12.1, patched so that feedback survives a mipmap_input pass
+# (vendor/README.md)
+[patch.crates-io]
+librashader-runtime-mtl = { path = "vendor/librashader-runtime-mtl-0.12.1" }
+librashader-runtime-wgpu = { path = "vendor/librashader-runtime-wgpu-0.12.1" }

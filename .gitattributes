@@ -11,3 +11,5 @@
 tools/crt/slang-shaders/** -text
 # And the GLSL librashader-cli writes from them, which vendor_chain.py check compares byte for byte.
 tools/crt/blender-chain/** -text
+# librashader's runtimes for crt-stream, as published (CRLF), with the patches vendor/README.md lists.
+tools/crt/crt-stream/vendor/librashader-runtime-*/** -text
